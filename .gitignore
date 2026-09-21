@@ -1,0 +1,25 @@
+# Godot generated data
+.godot/
+
+# C# build output
+.mono/
+bin/
+obj/
+TestResults/
+
+# Project-local development tools
+.tools/
+
+# IDE and OS files
+.idea/
+.vs/
+.vscode/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Local player content and exported builds
+user-content/
+builds/
+
