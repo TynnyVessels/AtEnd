@@ -47,11 +47,25 @@ public sealed record JudgmentWindows
 
 public sealed class JudgmentEvaluator
 {
+    private const double BoundaryToleranceMilliseconds = 1e-7;
     private readonly JudgmentWindows _windows;
 
     public JudgmentEvaluator(JudgmentWindows windows)
     {
         _windows = windows ?? throw new ArgumentNullException(nameof(windows));
+    }
+
+    public double MaximumWindowMilliseconds => _windows.ChaoticMilliseconds;
+
+    public bool IsWithinMaximumWindow(double errorMilliseconds)
+    {
+        if (!double.IsFinite(errorMilliseconds))
+        {
+            throw new ArgumentOutOfRangeException(nameof(errorMilliseconds));
+        }
+
+        return Math.Abs(errorMilliseconds)
+            <= _windows.ChaoticMilliseconds + BoundaryToleranceMilliseconds;
     }
 
     public ClickJudgment? EvaluateClick(double errorMilliseconds)
@@ -62,13 +76,14 @@ public sealed class JudgmentEvaluator
         }
 
         double absoluteError = Math.Abs(errorMilliseconds);
-        Judgment? judgment = absoluteError <= _windows.StrictlyPreciseMilliseconds
+        Judgment? judgment = absoluteError
+            <= _windows.StrictlyPreciseMilliseconds + BoundaryToleranceMilliseconds
             ? Judgment.StrictlyPrecise
-            : absoluteError <= _windows.PreciseMilliseconds
+            : absoluteError <= _windows.PreciseMilliseconds + BoundaryToleranceMilliseconds
                 ? Judgment.Precise
-                : absoluteError <= _windows.MisalignedMilliseconds
+                : absoluteError <= _windows.MisalignedMilliseconds + BoundaryToleranceMilliseconds
                     ? Judgment.Misaligned
-                    : absoluteError <= _windows.ChaoticMilliseconds
+                    : absoluteError <= _windows.ChaoticMilliseconds + BoundaryToleranceMilliseconds
                         ? Judgment.Chaotic
                         : null;
 
@@ -86,7 +101,8 @@ public sealed class JudgmentEvaluator
     }
 
     public Judgment? EvaluateOverdue(double elapsedAfterTargetMilliseconds) =>
-        elapsedAfterTargetMilliseconds > _windows.ChaoticMilliseconds
+        elapsedAfterTargetMilliseconds
+            > _windows.ChaoticMilliseconds + BoundaryToleranceMilliseconds
             ? Judgment.Chaotic
             : null;
 
