@@ -1,0 +1,19 @@
+[remap]
+
+importer="oggvorbisstr"
+type="AudioStreamOggVorbis"
+uid="uid://bd8t4augvlou4"
+path="res://.godot/imported/大国奏音 - YOUNITHM.ogg-16b6932f68cde1c9bc1a91413b147a7c.oggvorbisstr"
+
+[deps]
+
+source_file="res://songs/test-song/大国奏音 - YOUNITHM.ogg"
+dest_files=["res://.godot/imported/大国奏音 - YOUNITHM.ogg-16b6932f68cde1c9bc1a91413b147a7c.oggvorbisstr"]
+
+[params]
+
+loop=false
+loop_offset=0
+bpm=0
+beat_count=0
+bar_beats=4

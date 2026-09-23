@@ -1,0 +1,270 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AtEnd Tick 快速计算器</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      font-family: "Microsoft YaHei UI", "Segoe UI", sans-serif;
+      background: #0d1020;
+      color: #f3f5ff;
+    }
+    * { box-sizing: border-box; }
+    body {
+      min-height: 100vh;
+      margin: 0;
+      display: grid;
+      place-items: center;
+      padding: 24px;
+      background:
+        radial-gradient(circle at 20% 10%, #273174 0, transparent 34%),
+        radial-gradient(circle at 90% 90%, #572a71 0, transparent 32%),
+        #0d1020;
+    }
+    main {
+      width: min(720px, 100%);
+      padding: 32px;
+      border: 1px solid #5660a0;
+      border-radius: 20px;
+      background: rgba(20, 24, 48, 0.94);
+      box-shadow: 0 24px 70px #050611aa;
+    }
+    h1 { margin: 0 0 8px; font-size: clamp(25px, 5vw, 38px); }
+    .intro, .help { color: #b9c0e5; line-height: 1.7; }
+    .inputs {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 14px;
+      margin: 28px 0;
+    }
+    label { display: grid; gap: 8px; color: #cfd4f2; }
+    input, select {
+      width: 100%;
+      padding: 14px;
+      border: 1px solid #6670ae;
+      border-radius: 10px;
+      outline: none;
+      background: #0e1228;
+      color: #fff;
+      font: inherit;
+      font-size: 24px;
+      font-variant-numeric: tabular-nums;
+    }
+    input:focus, select:focus { border-color: #9faaff; box-shadow: 0 0 0 3px #7180df44; }
+    .result {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding: 22px;
+      border-radius: 14px;
+      background: linear-gradient(135deg, #252d68, #542e6b);
+    }
+    .position { margin-bottom: 5px; color: #d9dcf5; }
+    output {
+      display: block;
+      font-size: clamp(32px, 8vw, 58px);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+    button {
+      flex: none;
+      padding: 12px 18px;
+      border: 1px solid #c7ceff;
+      border-radius: 10px;
+      background: #eef0ff;
+      color: #151939;
+      font: inherit;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:hover { background: #fff; }
+    .fraction-buttons, .navigation-buttons {
+      display: grid;
+      gap: 10px;
+      margin: 16px 0;
+    }
+    .fraction-buttons { grid-template-columns: repeat(3, 1fr); }
+    .navigation-buttons { grid-template-columns: repeat(3, 1fr); }
+    .fraction-buttons button, .navigation-buttons button { width: 100%; }
+    .fraction-buttons button {
+      min-height: 68px;
+      font-size: 18px;
+    }
+    .fraction-buttons small {
+      display: block;
+      margin-top: 4px;
+      color: #555d8b;
+      font-size: 12px;
+      font-weight: 500;
+    }
+    .formula {
+      margin-top: 20px;
+      padding: 14px 16px;
+      border-radius: 10px;
+      background: #0e1228;
+      color: #aeb7ea;
+      font-family: Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+    .error { min-height: 1.5em; margin-top: 12px; color: #ff9ba8; }
+    @media (max-width: 560px) {
+      main { padding: 22px; }
+      .inputs { grid-template-columns: 1fr; }
+      .fraction-buttons { grid-template-columns: repeat(2, 1fr); }
+      .navigation-buttons { grid-template-columns: 1fr; }
+      .result { align-items: stretch; flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>AtEnd Tick 快速计算器</h1>
+    <div class="intro">只按小节计算，不使用拍号。第1小节起点为 0 tick；当前 4/4 谱面每小节为 7680 tick。</div>
+
+    <section class="inputs" aria-label="谱面位置">
+      <label>小节号（第1小节 = 0 tick）
+        <input id="measure" type="number" min="1" step="1" value="1" inputmode="numeric">
+      </label>
+      <label>添加个数
+        <input id="count" type="number" min="1" step="1" value="1" inputmode="numeric">
+      </label>
+    </section>
+
+    <section class="fraction-buttons" aria-label="增加小节数">
+      <button type="button" data-ticks="7680">+1小节<small>7680 tick</small></button>
+      <button type="button" data-ticks="3840">+1/2小节<small>3840 tick</small></button>
+      <button type="button" data-ticks="1920">+1/4小节<small>1920 tick</small></button>
+      <button type="button" data-ticks="960">+1/8小节<small>960 tick</small></button>
+      <button type="button" data-ticks="480">+1/16小节<small>480 tick</small></button>
+      <button type="button" data-ticks="240">+1/32小节<small>240 tick</small></button>
+      <button type="button" data-ticks="120">+1/64小节<small>120 tick</small></button>
+      <button type="button" data-ticks="60">+1/128小节<small>60 tick</small></button>
+    </section>
+
+    <section class="navigation-buttons" aria-label="整小节操作">
+      <button id="reset-measure" type="button">跳到输入小节</button>
+      <button id="current-measure" type="button">回到本小节起点</button>
+      <button id="next-measure" type="button">前往下一小节</button>
+    </section>
+
+    <section class="result" aria-live="polite">
+      <div>
+        <div id="position" class="position">第1小节（整小节）</div>
+        <output id="tick">0</output>
+        <div>tick</div>
+      </div>
+      <button id="copy" type="button">复制 tick</button>
+    </section>
+
+    <div id="error" class="error"></div>
+    <div id="formula" class="formula">第1小节起点：0 tick</div>
+    <p class="help">例如“添加个数”填3，再按 +1/4小节，会一次增加 3 × 1920 = 5760 tick。Audacity 标尺粗体 2 对应第2小节起点，即 7680 tick。</p>
+  </main>
+
+  <script>
+    const measureInput = document.querySelector("#measure");
+    const countInput = document.querySelector("#count");
+    const tickOutput = document.querySelector("#tick");
+    const positionOutput = document.querySelector("#position");
+    const formulaOutput = document.querySelector("#formula");
+    const errorOutput = document.querySelector("#error");
+    const copyButton = document.querySelector("#copy");
+    const resetMeasureButton = document.querySelector("#reset-measure");
+    const currentMeasureButton = document.querySelector("#current-measure");
+    const nextMeasureButton = document.querySelector("#next-measure");
+    const fractionButtons = document.querySelectorAll("[data-ticks]");
+    let currentTick = 0;
+
+    function greatestCommonDivisor(a, b) {
+      while (b !== 0) {
+        [a, b] = [b, a % b];
+      }
+      return a;
+    }
+
+    function render(message = "") {
+      const completedMeasures = Math.floor(currentTick / 7680);
+      const measure = completedMeasures + 1;
+      const remainder = currentTick % 7680;
+      if (remainder === 0) {
+        positionOutput.textContent = `第${measure}小节（整小节）`;
+      } else {
+        const divisor = greatestCommonDivisor(remainder, 7680);
+        positionOutput.textContent = `第${measure}小节 + ${remainder / divisor}/${7680 / divisor}小节`;
+      }
+      measureInput.value = String(measure);
+      tickOutput.value = String(currentTick);
+      formulaOutput.textContent = message || `当前位置：${currentTick} tick`;
+      errorOutput.textContent = "";
+    }
+
+    function resetToInputMeasure() {
+      const measure = Number(measureInput.value);
+      if (!Number.isInteger(measure) || measure < 1) {
+        errorOutput.textContent = "小节号必须是至少为1的整数。";
+        return;
+      }
+      currentTick = (measure - 1) * 7680;
+      render(`第${measure}小节起点：(${measure} - 1) × 7680 = ${currentTick} tick`);
+    }
+
+    function addTicks(stepTicks, label) {
+      const count = Number(countInput.value);
+      if (!Number.isInteger(count) || count < 1) {
+        errorOutput.textContent = "添加个数必须是至少为1的整数。";
+        return;
+      }
+      const before = currentTick;
+      const amount = stepTicks * count;
+      currentTick += amount;
+      render(`${before} + ${count} × ${stepTicks}（${label}）= ${currentTick} tick`);
+    }
+
+    for (const input of [measureInput, countInput]) {
+      input.addEventListener("focus", () => input.select());
+    }
+    fractionButtons.forEach(button => {
+      button.addEventListener("click", () => {
+        const label = button.childNodes[0].textContent.trim();
+        addTicks(Number(button.dataset.ticks), label);
+      });
+    });
+    resetMeasureButton.addEventListener("click", resetToInputMeasure);
+    currentMeasureButton.addEventListener("click", () => {
+      const before = currentTick;
+      currentTick = Math.floor(currentTick / 7680) * 7680;
+      measureInput.value = String(currentTick / 7680 + 1);
+      render(`${before} → 本小节起点 = ${currentTick} tick`);
+    });
+    nextMeasureButton.addEventListener("click", () => {
+      const before = currentTick;
+      currentTick = (Math.floor(currentTick / 7680) + 1) * 7680;
+      measureInput.value = String(currentTick / 7680 + 1);
+      render(`${before} → 下一小节 = ${currentTick} tick`);
+    });
+
+    copyButton.addEventListener("click", async () => {
+      if (tickOutput.value === "—") return;
+      try {
+        await navigator.clipboard.writeText(tickOutput.value);
+      } catch {
+        const temporaryInput = document.createElement("textarea");
+        temporaryInput.value = tickOutput.value;
+        temporaryInput.style.position = "fixed";
+        temporaryInput.style.opacity = "0";
+        document.body.appendChild(temporaryInput);
+        temporaryInput.select();
+        document.execCommand("copy");
+        temporaryInput.remove();
+      }
+      copyButton.textContent = "已复制";
+      setTimeout(() => { copyButton.textContent = "复制 tick"; }, 1000);
+    });
+
+    resetToInputMeasure();
+  </script>
+</body>
+</html>

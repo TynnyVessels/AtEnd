@@ -1,0 +1,13 @@
+{
+  "formatVersion": 1,
+  "audioTimeAtTickZeroSeconds": 1.846,
+  "initialBpm": 260.0,
+  "bpmChanges": [],
+  "timeSignatures": [
+    {
+      "tick": 0,
+      "numerator": 4,
+      "denominator": 4
+    }
+  ]
+}

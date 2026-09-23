@@ -8,9 +8,15 @@ namespace AtEnd.App.Input;
 
 public sealed class GodotKeyboardInput
 {
-    private static readonly IReadOnlyDictionary<PhysicalKey, Key> GodotPhysicalKeys =
-        new Dictionary<PhysicalKey, Key>
+    private static readonly IReadOnlyDictionary<PhysicalKey, GodotPhysicalKey> GodotPhysicalKeys =
+        new Dictionary<PhysicalKey, GodotPhysicalKey>
         {
+            [PhysicalKey.Tab] = new(Key.Tab),
+            [PhysicalKey.Backspace] = new(Key.Backspace),
+            [PhysicalKey.CapsLock] = new(Key.Capslock),
+            [PhysicalKey.LeftShift] = new(Key.Shift, KeyLocation.Left),
+            [PhysicalKey.RightShift] = new(Key.Shift, KeyLocation.Right),
+            [PhysicalKey.Enter] = new(Key.Enter),
             [PhysicalKey.A] = Key.A,
             [PhysicalKey.S] = Key.S,
             [PhysicalKey.D] = Key.D,
@@ -30,6 +36,10 @@ public sealed class GodotKeyboardInput
             [PhysicalKey.M] = Key.M,
             [PhysicalKey.Comma] = Key.Comma,
             [PhysicalKey.Period] = Key.Period,
+            [PhysicalKey.Apostrophe] = Key.Apostrophe,
+            [PhysicalKey.Slash] = Key.Slash,
+            [PhysicalKey.Backslash] = Key.Backslash,
+            [PhysicalKey.RightBracket] = Key.Bracketright,
             [PhysicalKey.Digit1] = Key.Key1,
             [PhysicalKey.Digit2] = Key.Key2,
             [PhysicalKey.Digit3] = Key.Key3,
@@ -55,13 +65,13 @@ public sealed class GodotKeyboardInput
             [PhysicalKey.LeftBracket] = Key.Bracketleft,
         };
 
-    private readonly LogicalInputState<Key> _state = new(GodotBindings);
+    private readonly LogicalInputState<GodotPhysicalKey> _state = new(GodotBindings);
 
     public bool TryHandle(InputEventKey keyEvent, out PressEvent? pressEvent)
     {
         ArgumentNullException.ThrowIfNull(keyEvent);
         pressEvent = null;
-        Key physicalKey = keyEvent.PhysicalKeycode;
+        GodotPhysicalKey physicalKey = FromEvent(keyEvent);
         if (!GodotBindings.ContainsKey(physicalKey))
         {
             return false;
@@ -85,13 +95,24 @@ public sealed class GodotKeyboardInput
     public bool IsRequirementHeld(InputRequirement requirement) =>
         _state.IsRequirementHeld(requirement);
 
-    private static IReadOnlyDictionary<Key, LogicalChannel> GodotBindings { get; } =
+    private static IReadOnlyDictionary<GodotPhysicalKey, LogicalChannel> GodotBindings { get; } =
         CreateGodotBindings();
 
-    private static IReadOnlyDictionary<Key, LogicalChannel> CreateGodotBindings()
+    private static IReadOnlyDictionary<GodotPhysicalKey, LogicalChannel> CreateGodotBindings()
     {
         return DefaultKeyboardBindings.All.ToDictionary(
             binding => GodotPhysicalKeys[binding.Key],
             binding => binding.Value);
+    }
+
+    private static GodotPhysicalKey FromEvent(InputEventKey keyEvent) => new(
+        keyEvent.PhysicalKeycode,
+        keyEvent.PhysicalKeycode == Key.Shift ? keyEvent.Location : KeyLocation.Unspecified);
+
+    private readonly record struct GodotPhysicalKey(
+        Key Key,
+        KeyLocation Location = KeyLocation.Unspecified)
+    {
+        public static implicit operator GodotPhysicalKey(Key key) => new(key);
     }
 }

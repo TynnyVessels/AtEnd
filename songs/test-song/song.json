@@ -1,0 +1,12 @@
+{
+  "formatVersion": 1,
+  "songId": "test-song",
+  "title": "Test Song",
+  "artist": "大国奏音",
+  "audioFile": "大国奏音 - YOUNITHM.ogg",
+  "jacketFile": null,
+  "preview": {
+    "startSeconds": 0.0,
+    "lengthSeconds": 15.0
+  }
+}

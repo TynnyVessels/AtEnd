@@ -29,7 +29,13 @@ var tests = new (string Name, Action Body)[]
     ("Note travel uses absolute audio time", TestNoteTravel),
     ("Gameplay session judges batches and scores hits", TestGameplaySessionHits),
     ("Gameplay session auto-misses overdue objects", TestGameplaySessionMisses),
+    ("Input grouping protects later same-channel notes", TestInputGroupingProtection),
+    ("Input grouping preserves same-tick multiplicity", TestInputGroupingMultiplicity),
+    ("Gameplay session judges hold points from held state", TestGameplaySessionHoldPoints),
     ("Gameplay session validates chart objects and time", TestGameplaySessionValidation),
+    ("Song package loader reads the formal test chart", TestSongPackageLoader),
+    ("Moving Rel holds interpolate point requirements", TestMovingHoldInterpolation),
+    ("Chart loader rejects malformed content", TestChartLoaderValidation),
 };
 
 int failures = 0;
@@ -292,26 +298,32 @@ static void TestDefaultBindings()
 {
     var expectedCounts = new Dictionary<LogicalChannel, int>
     {
-        [LogicalChannel.RelLeft] = 6,
-        [LogicalChannel.RelCenter] = 7,
-        [LogicalChannel.RelRight] = 6,
+        [LogicalChannel.RelLeft] = 8,
+        [LogicalChannel.RelCenter] = 9,
+        [LogicalChannel.RelRight] = 8,
         [LogicalChannel.DrmRed] = 8,
-        [LogicalChannel.DrmGreen] = 7,
-        [LogicalChannel.DrmBlue] = 8,
+        [LogicalChannel.DrmGreen] = 9,
+        [LogicalChannel.DrmBlue] = 10,
     };
 
-    Equal(42, DefaultKeyboardBindings.All.Count);
+    Equal(52, DefaultKeyboardBindings.All.Count);
     foreach ((LogicalChannel channel, int count) in expectedCounts)
     {
         Equal(count, DefaultKeyboardBindings.All.Count(binding => binding.Value == channel));
     }
 
     Equal(LogicalChannel.RelLeft, DefaultKeyboardBindings.All[PhysicalKey.A]);
+    Equal(LogicalChannel.RelLeft, DefaultKeyboardBindings.All[PhysicalKey.LeftShift]);
     Equal(LogicalChannel.RelCenter, DefaultKeyboardBindings.All[PhysicalKey.N]);
+    Equal(LogicalChannel.RelCenter, DefaultKeyboardBindings.All[PhysicalKey.K]);
     Equal(LogicalChannel.RelRight, DefaultKeyboardBindings.All[PhysicalKey.Semicolon]);
+    Equal(LogicalChannel.RelRight, DefaultKeyboardBindings.All[PhysicalKey.RightShift]);
     Equal(LogicalChannel.DrmRed, DefaultKeyboardBindings.All[PhysicalKey.Digit1]);
+    Equal(LogicalChannel.DrmRed, DefaultKeyboardBindings.All[PhysicalKey.Tab]);
     Equal(LogicalChannel.DrmGreen, DefaultKeyboardBindings.All[PhysicalKey.U]);
+    Equal(LogicalChannel.DrmGreen, DefaultKeyboardBindings.All[PhysicalKey.I]);
     Equal(LogicalChannel.DrmBlue, DefaultKeyboardBindings.All[PhysicalKey.LeftBracket]);
+    Equal(LogicalChannel.DrmBlue, DefaultKeyboardBindings.All[PhysicalKey.Backspace]);
 }
 
 static void TestRelRequirements()
@@ -530,6 +542,94 @@ static void TestGameplaySessionMisses()
     Equal(CompletionMark.None, session.Snapshot().HighestCompletionMark);
 }
 
+static void TestInputGroupingProtection()
+{
+    var timing = new TimingMap(0, 120);
+    var session = new ClickGameplaySession(timing, new[]
+    {
+        new ClickScoringObject(1, 1920, InputCategory.Rel,
+            InputRequirement.Rel(RelRegion.Left)),
+        new ClickScoringObject(2, 2140, InputCategory.Rel,
+            InputRequirement.Rel(RelRegion.Left)),
+    }, new JudgmentEvaluator(JudgmentWindows.Default));
+
+    IReadOnlyList<GameplayJudgment> protectedBatch = session.JudgeTimedBatch(new[]
+    {
+        new TimedPressEvent(new PressEvent(1, LogicalChannel.RelLeft), 0.500),
+        new TimedPressEvent(new PressEvent(2, LogicalChannel.RelLeft), 0.507),
+    });
+    Equal(1, protectedBatch.Count);
+    Equal(1L, protectedBatch[0].ObjectId);
+    Equal(false, session.IsJudged(2));
+
+    IReadOnlyList<GameplayJudgment> laterPress = session.JudgeTimedBatch(new[]
+    {
+        new TimedPressEvent(new PressEvent(3, LogicalChannel.RelLeft), 0.520),
+    });
+    Equal(1, laterPress.Count);
+    Equal(2L, laterPress[0].ObjectId);
+}
+
+static void TestInputGroupingMultiplicity()
+{
+    var timing = new TimingMap(0, 120);
+    var session = new ClickGameplaySession(timing, new[]
+    {
+        new ClickScoringObject(1, 1920, InputCategory.Rel,
+            InputRequirement.Rel(RelRegion.Left)),
+        new ClickScoringObject(2, 1920, InputCategory.Rel,
+            InputRequirement.Rel(RelRegion.Left)),
+    }, new JudgmentEvaluator(JudgmentWindows.Default));
+
+    IReadOnlyList<GameplayJudgment> chord = session.JudgeTimedBatch(new[]
+    {
+        new TimedPressEvent(new PressEvent(1, LogicalChannel.RelLeft), 0.500),
+        new TimedPressEvent(new PressEvent(2, LogicalChannel.RelLeft), 0.507),
+    });
+    Equal(2, chord.Count);
+    Equal(true, session.IsComplete);
+}
+
+static void TestGameplaySessionHoldPoints()
+{
+    var timing = new TimingMap(0, 120);
+    var session = new ClickGameplaySession(
+        timing,
+        new[]
+        {
+            new ClickScoringObject(1, 0, InputCategory.Rel,
+                InputRequirement.Rel(RelRegion.Left)),
+        },
+        new[]
+        {
+            new HoldScoringPoint(1, 0, 1920, InputCategory.Rel,
+                InputRequirement.Rel(RelRegion.Left)),
+            new HoldScoringPoint(1, 1, 3840, InputCategory.Rel,
+                InputRequirement.Rel(RelRegion.Right)),
+        },
+        new JudgmentEvaluator(JudgmentWindows.Default));
+
+    Equal(1, session.JudgeBatch(0,
+        new[] { new PressEvent(1, LogicalChannel.RelLeft) },
+        requirement => requirement.Accepts(LogicalChannel.RelLeft)).Count);
+
+    IReadOnlyList<GameplayJudgment> held = session.AdvanceTime(
+        0.5,
+        requirement => requirement.Accepts(LogicalChannel.RelLeft));
+    Equal(1, held.Count);
+    Equal(Judgment.StrictlyPrecise, held[0].Judgment);
+    Equal(0, held[0].HoldPointIndex);
+    Equal<TimingDirection?>(null, held[0].Direction);
+
+    IReadOnlyList<GameplayJudgment> released = session.AdvanceTime(1.0, _ => false);
+    Equal(1, released.Count);
+    Equal(Judgment.Chaotic, released[0].Judgment);
+    Equal(1, released[0].HoldPointIndex);
+    Equal(true, session.IsComplete);
+    Equal(0, session.Snapshot().CurrentCombo);
+    Equal(2, session.Snapshot().MaximumCombo);
+}
+
 static void TestGameplaySessionValidation()
 {
     var timing = new TimingMap(0, 120);
@@ -553,6 +653,88 @@ static void TestGameplaySessionValidation()
     }, evaluator);
     session.AdvanceTime(0.4);
     Throws<InvalidOperationException>(() => session.AdvanceTime(0.3));
+}
+
+static void TestSongPackageLoader()
+{
+    string? root = AppContext.BaseDirectory;
+    while (root is not null && !File.Exists(Path.Combine(root, "project.godot")))
+    {
+        root = Directory.GetParent(root)?.FullName;
+    }
+
+    if (root is null)
+    {
+        throw new InvalidOperationException("Could not locate the AtEnd repository root.");
+    }
+
+    SongPackageDefinition package = SongPackageLoader.LoadDirectory(
+        Path.Combine(root, "songs", "test-song"));
+    Equal("test-song", package.Song.SongId);
+    Equal("大国奏音", package.Song.Artist);
+    Near(1.846, package.Timing.TimingMap.AudioTimeAtTickZeroSeconds);
+    Near(260, package.Timing.TimingMap.InitialBeatsPerMinute);
+    Equal(1, package.Charts.Count);
+
+    ChartDefinition chart = package.Charts[0];
+    Equal("test-song-test", chart.ChartId);
+    Equal("Test", chart.Difficulty.Name);
+    Equal(3, chart.Difficulty.Level);
+    Equal("TynnyVessels", chart.Charter);
+    Equal(20, chart.Objects.Count);
+    Equal(18, chart.Objects.Count(item => item.Type == ChartObjectType.Click));
+    Equal(2, chart.Objects.Count(item => item.Type == ChartObjectType.Hold));
+    Equal(2, chart.Objects[0].Path.Count);
+    Equal(21120L, chart.Objects[0].Path[^1].Tick);
+    Equal(59520L, chart.Objects[^1].EndTick);
+    Near(7.153846153846154,
+        package.Timing.TimingMap.GetAudioTimeSeconds(chart.Objects[^1].EndTick)
+        - package.Timing.TimingMap.AudioTimeAtTickZeroSeconds);
+    Equal(18, chart.CreateClickScoringObjects().Count);
+    Equal(20, chart.CreateHeadScoringObjects().Count);
+    Equal(11, chart.CreateHoldScoringPoints().Count);
+    Equal(RelRegion.Right, chart.Objects[1].GetInputRequirement().RelRegions);
+    Equal(DrmColor.Green, chart.Objects[2].GetInputRequirement().DrmColor);
+}
+
+static void TestMovingHoldInterpolation()
+{
+    var hold = new ChartObjectDefinition(
+        1,
+        ChartObjectType.Hold,
+        InputCategory.Rel,
+        null,
+        0,
+        1920,
+        new[]
+        {
+            new LanePoint(0, 0, 6),
+            new LanePoint(1920, 12, 6),
+        },
+        new[] { 960L });
+
+    (double lane, double width) = hold.GetLaneGeometryAtTick(960);
+    Near(6, lane);
+    Near(6, width);
+    Equal(RelRegion.Center, hold.GetInputRequirementAtTick(960).RelRegions);
+    Throws<ArgumentOutOfRangeException>(() => hold.GetLaneGeometryAtTick(1921));
+}
+
+static void TestChartLoaderValidation()
+{
+    const string invalid = """
+        {
+          "formatVersion": 1,
+          "chartId": "invalid",
+          "difficulty": { "name": "Test", "level": 1 },
+          "charter": "Tester",
+          "visualSpeedEvents": [],
+          "objects": [
+            { "objectId": 1, "type": "click", "inputType": "rel", "tick": 0, "lane": 17, "width": 2 }
+          ]
+        }
+        """;
+    Throws<InvalidDataException>(() => SongPackageLoader.ParseChart(invalid));
 }
 
 static void Equal<T>(T expected, T actual)

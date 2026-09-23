@@ -1,0 +1,55 @@
+{
+  "formatVersion": 1,
+  "chartId": "test-song-test",
+  "difficulty": {
+    "name": "Test",
+    "level": 3
+  },
+  "charter": "TynnyVessels",
+  "visualSpeedEvents": [],
+  "objects": [
+    {
+      "objectId": 1,
+      "type": "hold",
+      "inputType": "rel",
+      "startTick": 0,
+      "endTick": 21120,
+      "path": [
+        { "tick": 0, "lane": 0, "width": 2 },
+        { "tick": 21120, "lane": 0, "width": 2 }
+      ],
+      "judgeTicks": [1920, 3840, 5760, 7680, 9600, 11520, 13440, 15360, 17280, 19200]
+    },
+    { "objectId": 2, "type": "click", "inputType": "rel", "tick": 23040, "lane": 13, "width": 3 },
+    { "objectId": 3, "type": "click", "inputType": "drm", "color": "green", "tick": 24960, "lane": 7, "width": 1 },
+    { "objectId": 4, "type": "click", "inputType": "drm", "color": "blue", "tick": 25920, "lane": 14, "width": 1 },
+    { "objectId": 5, "type": "click", "inputType": "drm", "color": "green", "tick": 26400, "lane": 7, "width": 1 },
+    { "objectId": 6, "type": "click", "inputType": "drm", "color": "blue", "tick": 26880, "lane": 14, "width": 1 },
+    { "objectId": 7, "type": "click", "inputType": "drm", "color": "green", "tick": 28800, "lane": 7, "width": 2 },
+    { "objectId": 8, "type": "click", "inputType": "rel", "tick": 30720, "lane": 2, "width": 2 },
+    { "objectId": 9, "type": "click", "inputType": "rel", "tick": 32640, "lane": 8, "width": 2 },
+    { "objectId": 10, "type": "click", "inputType": "rel", "tick": 34560, "lane": 8, "width": 2 },
+    { "objectId": 11, "type": "click", "inputType": "rel", "tick": 36480, "lane": 13, "width": 2 },
+    { "objectId": 12, "type": "click", "inputType": "rel", "tick": 38400, "lane": 2, "width": 2 },
+    { "objectId": 13, "type": "click", "inputType": "rel", "tick": 40320, "lane": 13, "width": 2 },
+    { "objectId": 14, "type": "click", "inputType": "rel", "tick": 42240, "lane": 8, "width": 2 },
+    { "objectId": 15, "type": "click", "inputType": "rel", "tick": 44160, "lane": 9, "width": 2 },
+    { "objectId": 16, "type": "click", "inputType": "drm", "color": "red", "tick": 46080, "lane": 3, "width": 5 },
+    { "objectId": 17, "type": "click", "inputType": "drm", "color": "blue", "tick": 48000, "lane": 10, "width": 5 },
+    { "objectId": 18, "type": "click", "inputType": "drm", "color": "green", "tick": 49920, "lane": 4, "width": 4 },
+    { "objectId": 19, "type": "click", "inputType": "drm", "color": "green", "tick": 51840, "lane": 7, "width": 4 },
+    {
+      "objectId": 20,
+      "type": "hold",
+      "inputType": "drm",
+      "color": "green",
+      "startTick": 55680,
+      "endTick": 59520,
+      "path": [
+        { "tick": 55680, "lane": 7, "width": 3 },
+        { "tick": 59520, "lane": 11, "width": 3 }
+      ],
+      "judgeTicks": [57600]
+    }
+  ]
+}

@@ -1,0 +1,157 @@
+{
+  "type": "hold",
+  "inputType": "rel",
+  "startTick": 0,
+  "endTick": 5280,
+  "path": [
+    { "tick": 0, "lane": 0, "width": 2 }
+  ],
+  "judgeTicks": [480, 960, 1440, 1920, 2400, 2880, 3360, 3840, 4320, 4800]
+}
+{
+  "type": "click",
+  "inputType": "rel",
+  "tick": 5760,
+  "lane": 13,
+  "width": 3
+}
+{
+  "type": "click",
+  "inputType": "drm",
+  "color": "green",
+  "tick": 6240,
+  "lane": 7,
+  "width": 1
+}
+{
+  "type": "click",
+  "inputType": "drm",
+  "color": "blue",
+  "tick": 6480,
+  "lane": 14,
+  "width": 1
+}
+{
+  "type": "click",
+  "inputType": "drm",
+  "color": "green",
+  "tick": 6600,
+  "lane": 7,
+  "width": 1
+}
+{
+  "type": "click",
+  "inputType": "drm",
+  "color": "blue",
+  "tick": 6720,
+  "lane": 14,
+  "width": 1
+}
+{
+  "type": "click",
+  "inputType": "drm",
+  "color": "green",
+  "tick": 7200,
+  "lane": 7,
+  "width": 2
+}
+{
+  "type": "click",
+  "inputType": "rel",
+  "tick": 7680,
+  "lane": 2,
+  "width": 2
+}
+{
+  "type": "click",
+  "inputType": "rel",
+  "tick": 8160,
+  "lane": 8,
+  "width": 2
+}
+{
+  "type": "click",
+  "inputType": "rel",
+  "tick": 8640,
+  "lane": 8,
+  "width": 2
+}
+{
+  "type": "click",
+  "inputType": "rel",
+  "tick": 9120,
+  "lane": 13,
+  "width": 2
+}
+{
+  "type": "click",
+  "inputType": "rel",
+  "tick": 9600,
+  "lane": 2,
+  "width": 2
+}
+{
+  "type": "click",
+  "inputType": "rel",
+  "tick": 10080,
+  "lane": 13,
+  "width": 2
+}
+{
+  "type": "click",
+  "inputType": "rel",
+  "tick": 10560,
+  "lane": 8,
+  "width": 2
+}
+{
+  "type": "click",
+  "inputType": "rel",
+  "tick": 11040,
+  "lane": 9,
+  "width": 2
+}
+{
+  "type": "click",
+  "inputType": "drm",
+  "color": "red",
+  "tick": 11520,
+  "lane": 3,
+  "width": 5
+}
+{
+  "type": "click",
+  "inputType": "drm",
+  "color": "blue",
+  "tick": 12000,
+  "lane": 10,
+  "width": 5
+}
+{
+  "type": "click",
+  "inputType": "drm",
+  "color": "green",
+  "tick": 12480,
+  "lane": 4,
+  "width": 4
+}
+{
+  "type": "click",
+  "inputType": "drm",
+  "color": "green",
+  "tick": 12960,
+  "lane": 7,
+  "width": 4
+}
+{
+  "type": "hold",
+  "inputType": "drm",
+  "color": "green",
+  "startTick": 13920,
+  "endTick": 14880,
+  "path": [
+    { "tick": 13920, "lane": 7, "width": 3 }
+    { "tick": 14880, "lane": 11, "width": 3 }
+  ],
+  "judgeTicks": [14400]
+}

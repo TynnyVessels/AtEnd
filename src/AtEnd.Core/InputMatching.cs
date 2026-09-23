@@ -29,9 +29,11 @@ public enum LogicalChannel
 
 public enum PhysicalKey
 {
+    Tab, Backspace, CapsLock, LeftShift, RightShift, Enter,
     A, S, D, Z, X, C,
     F, G, H, J, V, B, N,
     K, L, Semicolon, M, Comma, Period,
+    Apostrophe, Slash, Backslash, RightBracket,
     Digit1, Digit2, Digit3, Digit4, Q, W, E, R,
     Digit5, Digit6, Digit7, Digit8, T, Y, U,
     Digit9, Digit0, Minus, Equals, I, O, P, LeftBracket,
@@ -43,9 +45,11 @@ public static class DefaultKeyboardBindings
         new System.Collections.ObjectModel.ReadOnlyDictionary<PhysicalKey, LogicalChannel>(
             new Dictionary<PhysicalKey, LogicalChannel>
             {
+                [PhysicalKey.CapsLock] = LogicalChannel.RelLeft,
                 [PhysicalKey.A] = LogicalChannel.RelLeft,
                 [PhysicalKey.S] = LogicalChannel.RelLeft,
                 [PhysicalKey.D] = LogicalChannel.RelLeft,
+                [PhysicalKey.LeftShift] = LogicalChannel.RelLeft,
                 [PhysicalKey.Z] = LogicalChannel.RelLeft,
                 [PhysicalKey.X] = LogicalChannel.RelLeft,
                 [PhysicalKey.C] = LogicalChannel.RelLeft,
@@ -53,38 +57,46 @@ public static class DefaultKeyboardBindings
                 [PhysicalKey.G] = LogicalChannel.RelCenter,
                 [PhysicalKey.H] = LogicalChannel.RelCenter,
                 [PhysicalKey.J] = LogicalChannel.RelCenter,
+                [PhysicalKey.K] = LogicalChannel.RelCenter,
                 [PhysicalKey.V] = LogicalChannel.RelCenter,
                 [PhysicalKey.B] = LogicalChannel.RelCenter,
                 [PhysicalKey.N] = LogicalChannel.RelCenter,
-                [PhysicalKey.K] = LogicalChannel.RelRight,
+                [PhysicalKey.M] = LogicalChannel.RelCenter,
                 [PhysicalKey.L] = LogicalChannel.RelRight,
                 [PhysicalKey.Semicolon] = LogicalChannel.RelRight,
-                [PhysicalKey.M] = LogicalChannel.RelRight,
+                [PhysicalKey.Apostrophe] = LogicalChannel.RelRight,
+                [PhysicalKey.Enter] = LogicalChannel.RelRight,
                 [PhysicalKey.Comma] = LogicalChannel.RelRight,
                 [PhysicalKey.Period] = LogicalChannel.RelRight,
+                [PhysicalKey.Slash] = LogicalChannel.RelRight,
+                [PhysicalKey.RightShift] = LogicalChannel.RelRight,
                 [PhysicalKey.Digit1] = LogicalChannel.DrmRed,
                 [PhysicalKey.Digit2] = LogicalChannel.DrmRed,
                 [PhysicalKey.Digit3] = LogicalChannel.DrmRed,
                 [PhysicalKey.Digit4] = LogicalChannel.DrmRed,
+                [PhysicalKey.Tab] = LogicalChannel.DrmRed,
                 [PhysicalKey.Q] = LogicalChannel.DrmRed,
                 [PhysicalKey.W] = LogicalChannel.DrmRed,
                 [PhysicalKey.E] = LogicalChannel.DrmRed,
-                [PhysicalKey.R] = LogicalChannel.DrmRed,
                 [PhysicalKey.Digit5] = LogicalChannel.DrmGreen,
                 [PhysicalKey.Digit6] = LogicalChannel.DrmGreen,
                 [PhysicalKey.Digit7] = LogicalChannel.DrmGreen,
                 [PhysicalKey.Digit8] = LogicalChannel.DrmGreen,
+                [PhysicalKey.R] = LogicalChannel.DrmGreen,
                 [PhysicalKey.T] = LogicalChannel.DrmGreen,
                 [PhysicalKey.Y] = LogicalChannel.DrmGreen,
                 [PhysicalKey.U] = LogicalChannel.DrmGreen,
+                [PhysicalKey.I] = LogicalChannel.DrmGreen,
                 [PhysicalKey.Digit9] = LogicalChannel.DrmBlue,
                 [PhysicalKey.Digit0] = LogicalChannel.DrmBlue,
                 [PhysicalKey.Minus] = LogicalChannel.DrmBlue,
                 [PhysicalKey.Equals] = LogicalChannel.DrmBlue,
-                [PhysicalKey.I] = LogicalChannel.DrmBlue,
+                [PhysicalKey.Backspace] = LogicalChannel.DrmBlue,
                 [PhysicalKey.O] = LogicalChannel.DrmBlue,
                 [PhysicalKey.P] = LogicalChannel.DrmBlue,
                 [PhysicalKey.LeftBracket] = LogicalChannel.DrmBlue,
+                [PhysicalKey.RightBracket] = LogicalChannel.DrmBlue,
+                [PhysicalKey.Backslash] = LogicalChannel.DrmBlue,
             });
 }
 
@@ -264,10 +276,18 @@ public static class BatchInputMatcher
 {
     public static BatchMatchResult Match(
         IReadOnlyList<ClickCandidate> candidates,
-        IReadOnlyList<PressEvent> presses)
+        IReadOnlyList<PressEvent> presses) =>
+        Match(candidates, presses, static (candidate, press) =>
+            candidate.Requirement.Accepts(press.Channel));
+
+    public static BatchMatchResult Match(
+        IReadOnlyList<ClickCandidate> candidates,
+        IReadOnlyList<PressEvent> presses,
+        Func<ClickCandidate, PressEvent, bool> canMatch)
     {
         ArgumentNullException.ThrowIfNull(candidates);
         ArgumentNullException.ThrowIfNull(presses);
+        ArgumentNullException.ThrowIfNull(canMatch);
         if (candidates.Any(candidate => !candidate.Requirement.IsValid))
         {
             throw new ArgumentException("Candidates contain an invalid input requirement.", nameof(candidates));
@@ -280,7 +300,7 @@ public static class BatchInputMatcher
         for (int candidateIndex = 0; candidateIndex < candidates.Count; candidateIndex++)
         {
             var visitedPresses = new bool[presses.Count];
-            TryAssign(candidateIndex, candidates, presses, pressToCandidate, visitedPresses);
+            TryAssign(candidateIndex, candidates, presses, pressToCandidate, visitedPresses, canMatch);
         }
 
         int[] candidateToPress = Enumerable.Repeat(-1, candidates.Count).ToArray();
@@ -327,12 +347,13 @@ public static class BatchInputMatcher
         IReadOnlyList<ClickCandidate> candidates,
         IReadOnlyList<PressEvent> presses,
         int[] pressToCandidate,
-        bool[] visitedPresses)
+        bool[] visitedPresses,
+        Func<ClickCandidate, PressEvent, bool> canMatch)
     {
         for (int pressIndex = 0; pressIndex < presses.Count; pressIndex++)
         {
             if (visitedPresses[pressIndex]
-                || !candidates[candidateIndex].Requirement.Accepts(presses[pressIndex].Channel))
+                || !canMatch(candidates[candidateIndex], presses[pressIndex]))
             {
                 continue;
             }
@@ -340,7 +361,8 @@ public static class BatchInputMatcher
             visitedPresses[pressIndex] = true;
             int previousCandidate = pressToCandidate[pressIndex];
             if (previousCandidate < 0
-                || TryAssign(previousCandidate, candidates, presses, pressToCandidate, visitedPresses))
+                || TryAssign(previousCandidate, candidates, presses, pressToCandidate,
+                    visitedPresses, canMatch))
             {
                 pressToCandidate[pressIndex] = candidateIndex;
                 return true;
