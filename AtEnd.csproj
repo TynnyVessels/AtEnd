@@ -4,6 +4,12 @@
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
     <RootNamespace>AtEnd</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
   </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="src\App\**\*.cs" />
+    <ProjectReference Include="src\AtEnd.Core\AtEnd.Core.csproj" />
+  </ItemGroup>
 </Project>
 
