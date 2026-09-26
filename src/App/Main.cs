@@ -1,4 +1,6 @@
 using System;
+using System.IO;
+using System.Linq;
 using AtEnd.App.Input;
 using AtEnd.App.Playfield;
 using AtEnd.Core;
@@ -25,6 +27,18 @@ public partial class Main : Control
     private Label? _title;
     private PlayfieldView? _playfield;
     private Tween? _judgmentFadeTween;
+    private Control? _songSelectOverlay;
+    private Label? _selectionSongTitle;
+    private Label? _selectionArtist;
+    private Label? _selectionDifficulty;
+    private Label? _selectionCharter;
+    private Label? _selectionError;
+    private Label? _selectionJacketPlaceholder;
+    private TextureRect? _selectionJacket;
+    private Button? _selectionSongButton;
+    private Button? _selectionStartButton;
+    private SongPackageDefinition? _selectedPackage;
+    private ChartDefinition? _selectedChart;
 
     public AppFlowState CurrentFlowState { get; private set; } = AppFlowState.SongSelect;
 
@@ -35,38 +49,230 @@ public partial class Main : Control
         _scoreStatus = GetNode<Label>("ScoreStatus");
         _title = GetNode<Label>("Title");
         _playfield = GetNode<PlayfieldView>("Playfield");
+        _songSelectOverlay = GetNode<Control>("SongSelectOverlay");
+        _selectionSongTitle = GetNode<Label>("SongSelectOverlay/Panel/SongTitle");
+        _selectionArtist = GetNode<Label>("SongSelectOverlay/Panel/Artist");
+        _selectionDifficulty = GetNode<Label>("SongSelectOverlay/Panel/Difficulty");
+        _selectionCharter = GetNode<Label>("SongSelectOverlay/Panel/Charter");
+        _selectionError = GetNode<Label>("SongSelectOverlay/Panel/Error");
+        _selectionJacketPlaceholder =
+            GetNode<Label>("SongSelectOverlay/Panel/JacketFrame/JacketPlaceholder");
+        _selectionJacket = GetNode<TextureRect>("SongSelectOverlay/Panel/JacketFrame/Jacket");
+        _selectionSongButton = GetNode<Button>("SongSelectOverlay/Panel/SongList/SongButton");
+        _selectionStartButton = GetNode<Button>("SongSelectOverlay/Panel/StartButton");
+        _selectionStartButton.Pressed += StartSelectedSong;
         _playfield.IsRequirementHeld = _keyboardInput.IsRequirementHeld;
         _playfield.JudgmentResolved += OnJudgmentResolved;
         _playfield.CycleCompleted += OnCycleCompleted;
         _playfield.SongCompleted += OnSongCompleted;
-        if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--smoke-test") >= 0)
+        string[] arguments = OS.GetCmdlineUserArgs();
+        bool demoSmokeTest = Array.IndexOf(arguments, "--smoke-test") >= 0;
+        bool songSmokeTest = Array.IndexOf(arguments, "--song-smoke-test") >= 0;
+        bool selectionSmokeTest = Array.IndexOf(arguments, "--selection-smoke-test") >= 0;
+        if (demoSmokeTest)
         {
             CurrentFlowState = AppFlowState.Playing;
+            _songSelectOverlay.Visible = false;
         }
         else
         {
-            StartSong(DefaultSongPackagePath, DefaultChartId);
+            PrepareSongSelection(DefaultSongPackagePath, DefaultChartId);
+            if (songSmokeTest)
+            {
+                StartSelectedSong();
+            }
+            else
+            {
+                ShowSongSelect();
+                if (selectionSmokeTest)
+                {
+                    RunSelectionSmokeTest();
+                }
+            }
         }
 
-        UpdateSongInfo();
         UpdateScore(_playfield.CurrentScore);
         GD.Print("AtEnd development shell is ready.");
     }
 
-    private void StartSong(string packageDirectoryPath, string chartId)
+    private void PrepareSongSelection(string packageDirectoryPath, string chartId)
     {
-        if (_playfield is null)
+        try
         {
-            throw new InvalidOperationException("The playfield is not available.");
+            string filesystemPath = ProjectSettings.GlobalizePath(packageDirectoryPath);
+            SongPackageDefinition package = SongPackageLoader.LoadDirectory(filesystemPath);
+            ChartDefinition? chart = package.Charts
+                .SingleOrDefault(item => item.ChartId == chartId);
+            if (chart is null)
+            {
+                throw new InvalidDataException(
+                    $"Song package '{package.Song.SongId}' does not contain chart '{chartId}'.");
+            }
+
+            _selectedPackage = package;
+            _selectedChart = chart;
+            if (_selectionSongButton is not null)
+            {
+                _selectionSongButton.Text = package.Song.Title;
+            }
+
+            if (_selectionSongTitle is not null)
+            {
+                _selectionSongTitle.Text = package.Song.Title;
+            }
+
+            if (_selectionArtist is not null)
+            {
+                _selectionArtist.Text = package.Song.Artist;
+            }
+
+            if (_selectionDifficulty is not null)
+            {
+                _selectionDifficulty.Text =
+                    $"{chart.Difficulty.Name}  ·  LEVEL {chart.Difficulty.Level}";
+            }
+
+            if (_selectionCharter is not null)
+            {
+                _selectionCharter.Text = $"CHART  ·  {chart.Charter}";
+            }
+
+            LoadSelectionJacket(package);
+
+            if (_selectionStartButton is not null)
+            {
+                _selectionStartButton.Disabled = false;
+            }
+
+            if (_selectionError is not null)
+            {
+                _selectionError.Visible = false;
+            }
+        }
+        catch (Exception exception)
+        {
+            _selectedPackage = null;
+            _selectedChart = null;
+            ShowSelectionError(exception.Message);
+        }
+    }
+
+    private void LoadSelectionJacket(SongPackageDefinition package)
+    {
+        if (_selectionJacket is null || _selectionJacketPlaceholder is null)
+        {
+            return;
         }
 
-        _playfield.StartSong(packageDirectoryPath, chartId);
-        CurrentFlowState = AppFlowState.Playing;
+        _selectionJacket.Texture = null;
+        _selectionJacketPlaceholder.Text = $"NO JACKET\n{package.Song.Title}";
+        _selectionJacketPlaceholder.Visible = true;
+        if (package.Song.JacketFile is null)
+        {
+            return;
+        }
+
+        string jacketPath = Path.Combine(package.DirectoryPath, package.Song.JacketFile);
+        var image = new Image();
+        Error loadError = image.Load(jacketPath);
+        if (loadError != Error.Ok)
+        {
+            throw new InvalidDataException(
+                $"Godot could not load jacket '{jacketPath}' ({loadError}).");
+        }
+
+        _selectionJacket.Texture = ImageTexture.CreateFromImage(image);
+        _selectionJacketPlaceholder.Visible = false;
+    }
+
+    private void StartSelectedSong()
+    {
+        if (_playfield is null || _selectedPackage is null || _selectedChart is null)
+        {
+            return;
+        }
+
+        try
+        {
+            _playfield.StartSong(_selectedPackage, _selectedChart.ChartId);
+            CurrentFlowState = AppFlowState.Playing;
+            if (_songSelectOverlay is not null)
+            {
+                _songSelectOverlay.Visible = false;
+            }
+
+            UpdateSongInfo();
+            UpdateScore(_playfield.CurrentScore);
+        }
+        catch (Exception exception)
+        {
+            ShowSongSelect();
+            ShowSelectionError(exception.Message);
+        }
+    }
+
+    private void ShowSongSelect()
+    {
+        CurrentFlowState = AppFlowState.SongSelect;
+        if (_songSelectOverlay is not null)
+        {
+            _songSelectOverlay.Visible = true;
+        }
+    }
+
+    private void ShowSelectionError(string message)
+    {
+        if (_selectionError is not null)
+        {
+            _selectionError.Text = $"LOAD ERROR  ·  {message}";
+            _selectionError.Visible = true;
+        }
+
+        if (_selectionStartButton is not null)
+        {
+            _selectionStartButton.Disabled = true;
+        }
+    }
+
+    private void RunSelectionSmokeTest()
+    {
+        bool valid = CurrentFlowState == AppFlowState.SongSelect
+            && _playfield?.PlaybackState == SongPlaybackState.Idle
+            && _songSelectOverlay?.Visible == true
+            && _selectionStartButton?.Disabled == false
+            && _selectedPackage is not null
+            && _selectedChart is not null;
+        if (valid)
+        {
+            GD.Print("Song selection smoke test passed: metadata loaded and playback remains idle.");
+        }
+        else
+        {
+            GD.PushError("Song selection smoke test failed.");
+        }
+
+        GetTree().Quit(valid ? 0 : 1);
     }
 
     public override void _Input(InputEvent @event)
     {
-        if (@event is not InputEventKey keyEvent
+        if (@event is not InputEventKey keyEvent)
+        {
+            return;
+        }
+
+        if (CurrentFlowState == AppFlowState.SongSelect)
+        {
+            if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Enter)
+            {
+                StartSelectedSong();
+                GetViewport().SetInputAsHandled();
+            }
+
+            return;
+        }
+
+        if (CurrentFlowState != AppFlowState.Playing
             || !_keyboardInput.TryHandle(keyEvent, out PressEvent? pressEvent))
         {
             return;
