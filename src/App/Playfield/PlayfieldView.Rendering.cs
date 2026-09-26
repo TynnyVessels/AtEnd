@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AtEnd.Core;
@@ -28,6 +29,9 @@ public partial class PlayfieldView
 
     [Export(PropertyHint.Range, "1.0,3.0,0.05")]
     public double TravelAccelerationExponent { get; set; } = 2.3;
+
+    [Export(PropertyHint.Range, "0.25,4.0,0.05")]
+    public double PlayerScrollSpeedMultiplier { get; set; } = 1;
 
     private static RuntimeNote ToRuntimeNote(ChartObjectDefinition item)
     {
@@ -130,9 +134,10 @@ public partial class PlayfieldView
     private void DrawMovingNotes()
     {
         double rawAudioTime = _audioClock?.CurrentTimeSeconds ?? 0;
+        double adjustedAudioTime = TimingOffsets.AdjustAudioTime(rawAudioTime);
         double currentAudioTime = _smokeTest
-            ? rawAudioTime % DemoCycleSeconds
-            : rawAudioTime;
+            ? adjustedAudioTime % DemoCycleSeconds
+            : adjustedAudioTime;
         foreach (RuntimeNote note in _activeNotes)
         {
             bool missed = _missedNoteIds.Contains(note.ObjectId);
@@ -149,11 +154,11 @@ public partial class PlayfieldView
                 effectiveAudioTime -= DemoCycleSeconds;
             }
 
-            double linearProgress = NoteTravel.GetProgress(
-                _activeTiming,
+            double linearProgress = _activeVisualSpeed.GetProgress(
                 note.TargetTick,
                 effectiveAudioTime,
-                ApproachDurationSeconds);
+                ApproachDurationSeconds,
+                PlayerScrollSpeedMultiplier);
             if (PlayfieldPresentation.IsProgressVisible(
                 linearProgress,
                 TrackWindowBottomProgress + NoteCullPaddingProgress))
@@ -168,7 +173,8 @@ public partial class PlayfieldView
 
     private void DrawMovingHolds()
     {
-        double currentAudioTime = _audioClock?.CurrentTimeSeconds ?? 0;
+        double rawAudioTime = _audioClock?.CurrentTimeSeconds ?? 0;
+        double currentAudioTime = TimingOffsets.AdjustAudioTime(rawAudioTime);
         foreach (RuntimeHold hold in _activeHolds)
         {
             ChartObjectDefinition definition = hold.Definition;
@@ -177,16 +183,43 @@ public partial class PlayfieldView
                 definition.Path.Skip(1),
                 (first, second) => (first, second)))
             {
-                int subdivisions = Math.Max(1, (int)Math.Ceiling((second.Tick - first.Tick) / 480d));
-                for (int part = 0; part < subdivisions; part++)
+                foreach ((long fromTick, long toTick) in GetHoldSlices(first, second))
                 {
-                    double fromRatio = part / (double)subdivisions;
-                    double toRatio = (part + 1) / (double)subdivisions;
-                    long fromTick = first.Tick + (long)Math.Round((second.Tick - first.Tick) * fromRatio);
-                    long toTick = first.Tick + (long)Math.Round((second.Tick - first.Tick) * toRatio);
                     DrawHoldSlice(hold, fromTick, toTick, currentAudioTime, clipAtJudgmentLine);
                 }
             }
+        }
+    }
+
+    private IEnumerable<(long FromTick, long ToTick)> GetHoldSlices(
+        LanePoint first,
+        LanePoint second)
+    {
+        var ticks = new SortedSet<long> { first.Tick, second.Tick };
+        int subdivisions = Math.Max(1, (int)Math.Ceiling((second.Tick - first.Tick) / 480d));
+        for (int part = 1; part < subdivisions; part++)
+        {
+            double ratio = part / (double)subdivisions;
+            ticks.Add(first.Tick + (long)Math.Round((second.Tick - first.Tick) * ratio));
+        }
+
+        foreach (VisualSpeedEvent speedEvent in _activeVisualSpeed.Events)
+        {
+            if (speedEvent.Tick > first.Tick && speedEvent.Tick < second.Tick)
+            {
+                ticks.Add(speedEvent.Tick);
+            }
+        }
+
+        long? previous = null;
+        foreach (long tick in ticks)
+        {
+            if (previous is long fromTick)
+            {
+                yield return (fromTick, tick);
+            }
+
+            previous = tick;
         }
     }
 
@@ -210,18 +243,29 @@ public partial class PlayfieldView
         double currentAudioTime,
         bool clipAtJudgmentLine)
     {
-        double fromLinear = NoteTravel.GetProgress(
-            _activeTiming, fromTick, currentAudioTime, ApproachDurationSeconds);
-        double toLinear = NoteTravel.GetProgress(
-            _activeTiming, toTick, currentAudioTime, ApproachDurationSeconds);
-        if ((fromLinear < 0 && toLinear < 0) || (fromLinear > 1.07 && toLinear > 1.07))
+        double fromVisual = _activeVisualSpeed.GetProgress(
+            fromTick,
+            currentAudioTime,
+            ApproachDurationSeconds,
+            PlayerScrollSpeedMultiplier);
+        double toVisual = _activeVisualSpeed.GetProgress(
+            toTick,
+            currentAudioTime,
+            ApproachDurationSeconds,
+            PlayerScrollSpeedMultiplier);
+        if ((fromVisual < 0 && toVisual < 0) || (fromVisual > 1.07 && toVisual > 1.07))
         {
             return;
         }
 
+        double fromTimeline = NoteTravel.GetProgress(
+            _activeTiming, fromTick, currentAudioTime, ApproachDurationSeconds);
+        double toTimeline = NoteTravel.GetProgress(
+            _activeTiming, toTick, currentAudioTime, ApproachDurationSeconds);
+
         HoldSliceClipMode clipMode = PlayfieldPresentation.GetHoldSliceClipMode(
-            fromLinear,
-            toLinear,
+            fromTimeline,
+            toTimeline,
             clipAtJudgmentLine);
         if (clipMode == HoldSliceClipMode.Hidden)
         {
@@ -241,23 +285,23 @@ public partial class PlayfieldView
             double clippedWidth = fromWidth + ((toWidth - fromWidth) * clipRatio);
             if (clipMode == HoldSliceClipMode.ClipFrom)
             {
-                fromLinear = 1;
+                fromVisual = 1;
                 fromLane = clippedLane;
                 fromWidth = clippedWidth;
             }
             else
             {
-                toLinear = 1;
+                toVisual = 1;
                 toLane = clippedLane;
                 toWidth = clippedWidth;
             }
         }
 
         float fromProgress = (float)PlayfieldPresentation.ApplyAcceleration(
-            fromLinear,
+            fromVisual,
             TravelAccelerationExponent);
         float toProgress = (float)PlayfieldPresentation.ApplyAcceleration(
-            toLinear,
+            toVisual,
             TravelAccelerationExponent);
         Vector2[] polygon =
         {

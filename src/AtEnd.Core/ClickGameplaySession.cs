@@ -49,13 +49,20 @@ public sealed class ClickGameplaySession
     private readonly HashSet<(long ObjectId, int PointIndex)> _judgedHoldPoints = new();
     private readonly ScoreRun _score;
     private readonly Dictionary<LogicalChannel, TargetGroupGuard> _targetGroupGuards = new();
+    private readonly double _inputOffsetSeconds;
     private double _latestAudioTimeSeconds = double.NegativeInfinity;
 
     public ClickGameplaySession(
         TimingMap timingMap,
         IEnumerable<ClickScoringObject> objects,
-        JudgmentEvaluator evaluator)
-        : this(timingMap, objects, Array.Empty<HoldScoringPoint>(), evaluator)
+        JudgmentEvaluator evaluator,
+        double inputOffsetMilliseconds = 0)
+        : this(
+            timingMap,
+            objects,
+            Array.Empty<HoldScoringPoint>(),
+            evaluator,
+            inputOffsetMilliseconds)
     {
     }
 
@@ -63,10 +70,17 @@ public sealed class ClickGameplaySession
         TimingMap timingMap,
         IEnumerable<ClickScoringObject> objects,
         IEnumerable<HoldScoringPoint> holdPoints,
-        JudgmentEvaluator evaluator)
+        JudgmentEvaluator evaluator,
+        double inputOffsetMilliseconds = 0)
     {
         _timingMap = timingMap ?? throw new ArgumentNullException(nameof(timingMap));
         _evaluator = evaluator ?? throw new ArgumentNullException(nameof(evaluator));
+        if (!double.IsFinite(inputOffsetMilliseconds))
+        {
+            throw new ArgumentOutOfRangeException(nameof(inputOffsetMilliseconds));
+        }
+
+        _inputOffsetSeconds = inputOffsetMilliseconds / 1000d;
         ArgumentNullException.ThrowIfNull(objects);
         _objects = objects.OrderBy(item => item.TargetTick).ThenBy(item => item.ObjectId).ToArray();
         ArgumentNullException.ThrowIfNull(holdPoints);
@@ -275,7 +289,8 @@ public sealed class ClickGameplaySession
     }
 
     private double GetErrorMilliseconds(ClickScoringObject item, double audioTimeSeconds) =>
-        (audioTimeSeconds - _timingMap.GetAudioTimeSeconds(item.TargetTick)) * 1000d;
+        (audioTimeSeconds + _inputOffsetSeconds
+            - _timingMap.GetAudioTimeSeconds(item.TargetTick)) * 1000d;
 
     private void ValidateTime(double audioTimeSeconds)
     {

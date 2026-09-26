@@ -38,6 +38,7 @@ public partial class PlayfieldView : Control
     private AudioStreamPlayer? _audioPlayer;
     private AudioStreamWav? _silentAudioStream;
     private TimingMap _activeTiming = DemoTiming;
+    private VisualSpeedMap _activeVisualSpeed = new(DemoTiming);
     private RuntimeNote[] _activeNotes = DemoNotes;
     private RuntimeHold[] _activeHolds = Array.Empty<RuntimeHold>();
     private ClickScoringObject[] _activeClickObjects = DemoNotes
@@ -67,6 +68,16 @@ public partial class PlayfieldView : Control
     public string LoadedSongArtist { get; private set; } = "Development Track";
     public string LoadedDifficulty { get; private set; } = "Prototype";
     public string LoadedCharter { get; private set; } = "AtEnd Team";
+
+    [Export(PropertyHint.Range, "-500,500,1")]
+    public double GlobalTimingOffsetMilliseconds { get; set; }
+
+    [Export(PropertyHint.Range, "-500,500,1")]
+    public double InputOffsetMilliseconds { get; set; }
+
+    private GameplayTimingOffsets TimingOffsets => new(
+        GlobalTimingOffsetMilliseconds,
+        InputOffsetMilliseconds);
 
     public override void _Ready()
     {
@@ -164,7 +175,9 @@ public partial class PlayfieldView : Control
 
     public void QueuePress(PressEvent pressEvent)
     {
-        double totalAudioTime = _audioClock?.CurrentTimeSeconds ?? 0;
+        double rawAudioTime = _audioClock?.CurrentTimeSeconds ?? 0;
+        // Input compensation belongs to judgment error calculation, not the session clock.
+        double totalAudioTime = TimingOffsets.AdjustAudioTime(rawAudioTime);
         if (!_smokeTest)
         {
             _pendingPresses.Add(new TimedPressEvent(pressEvent, totalAudioTime));
@@ -203,6 +216,7 @@ public partial class PlayfieldView : Control
         SongPackageDefinition package = SongPackageLoader.LoadDirectory(packagePath);
         ChartDefinition chart = package.Charts.Single(item => item.ChartId == "test-song-test");
         _activeTiming = package.Timing.TimingMap;
+        _activeVisualSpeed = new VisualSpeedMap(_activeTiming, chart.VisualSpeedEvents);
         _activeClickObjects = chart.CreateHeadScoringObjects().ToArray();
         _activeHoldPoints = chart.CreateHoldScoringPoints().ToArray();
         _activeNotes = chart.Objects.Select(ToRuntimeNote).ToArray();
@@ -235,7 +249,7 @@ public partial class PlayfieldView : Control
             return;
         }
 
-        double totalAudioTime = _audioClock.CurrentTimeSeconds;
+        double totalAudioTime = TimingOffsets.AdjustAudioTime(_audioClock.CurrentTimeSeconds);
         long cycle = (long)Math.Floor(totalAudioTime / DemoCycleSeconds);
         EnsureCycle(cycle);
         double cycleAudioTime = totalAudioTime - (cycle * DemoCycleSeconds);
@@ -259,7 +273,7 @@ public partial class PlayfieldView : Control
             return;
         }
 
-        double audioTime = _audioClock.CurrentTimeSeconds;
+        double audioTime = TimingOffsets.AdjustAudioTime(_audioClock.CurrentTimeSeconds);
         if (_pendingPresses.Count > 0)
         {
             Publish(_gameplaySession.JudgeTimedBatch(_pendingPresses, IsRequirementHeld));
@@ -269,7 +283,9 @@ public partial class PlayfieldView : Control
         Publish(_gameplaySession.AdvanceTime(audioTime, IsRequirementHeld));
         if (!_songCompleted && !_audioPlayer.Playing)
         {
-            double endTime = _audioPlayer.Stream?.GetLength() ?? audioTime;
+            double rawEndTime = _audioPlayer.Stream?.GetLength()
+                ?? _audioClock.CurrentTimeSeconds;
+            double endTime = TimingOffsets.AdjustAudioTime(rawEndTime);
             _gameplaySession.CompleteNormally(Math.Max(audioTime, endTime));
             _songCompleted = true;
             CycleCompleted?.Invoke(_gameplaySession.Snapshot());
@@ -296,7 +312,7 @@ public partial class PlayfieldView : Control
         _activeCycle = cycle;
     }
 
-    private static ClickGameplaySession CreateGameplaySession()
+    private ClickGameplaySession CreateGameplaySession()
     {
         ClickScoringObject[] objects = DemoNotes
             .Select(note => new ClickScoringObject(
@@ -308,14 +324,16 @@ public partial class PlayfieldView : Control
         return new ClickGameplaySession(
             DemoTiming,
             objects,
-            new JudgmentEvaluator(JudgmentWindows.Default));
+            new JudgmentEvaluator(JudgmentWindows.Default),
+            InputOffsetMilliseconds);
     }
 
     private ClickGameplaySession CreateActiveGameplaySession() => new(
         _activeTiming,
         _activeClickObjects,
         _activeHoldPoints,
-        new JudgmentEvaluator(JudgmentWindows.Default));
+        new JudgmentEvaluator(JudgmentWindows.Default),
+        InputOffsetMilliseconds);
 
     private void Publish(IEnumerable<GameplayJudgment> judgments)
     {

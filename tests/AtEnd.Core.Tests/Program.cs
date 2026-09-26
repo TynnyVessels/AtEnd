@@ -27,11 +27,18 @@ var tests = new (string Name, Action Body)[]
     ("Physical input state filters repeats and tracks holds", TestPhysicalInputState),
     ("Input batches validate identifiers and enum values", TestInvalidInputData),
     ("Note travel uses absolute audio time", TestNoteTravel),
+    ("Default visual speed preserves note travel", TestDefaultVisualSpeed),
+    ("Visual speed integrates multiplier changes", TestVisualSpeedChanges),
+    ("Visual speed supports stops and reverse travel", TestVisualSpeedStopsAndReverse),
+    ("Visual speed rejects invalid maps and player speed", TestVisualSpeedValidation),
+    ("Gameplay timing offsets adjust audio and input independently", TestGameplayTimingOffsets),
+    ("Chart format accepts stop and reverse speed events", TestChartVisualSpeedParsing),
     ("Playfield acceleration remains continuous past judgment", TestPlayfieldAcceleration),
     ("Playfield note visibility preserves misses", TestPlayfieldNoteVisibility),
     ("Caught hold slices clip at the judgment line", TestCaughtHoldSliceClipping),
     ("Released hold slices remain visible past judgment", TestReleasedHoldSliceVisibility),
     ("Gameplay session judges batches and scores hits", TestGameplaySessionHits),
+    ("Gameplay input offset adjusts judgment without moving session time", TestGameplayInputOffset),
     ("Gameplay session auto-misses overdue objects", TestGameplaySessionMisses),
     ("Input grouping protects later same-channel notes", TestInputGroupingProtection),
     ("Input grouping preserves same-tick multiplicity", TestInputGroupingMultiplicity),
@@ -487,6 +494,109 @@ static void TestNoteTravel()
         NoteTravel.GetProgress(timing, targetTick, 0, 0));
 }
 
+static void TestDefaultVisualSpeed()
+{
+    var timing = new TimingMap(0.25, 120, new[] { new BpmChange(3840, 240) });
+    var visualSpeed = new VisualSpeedMap(timing);
+    const long targetTick = 5760;
+    double targetTime = timing.GetAudioTimeSeconds(targetTick);
+    foreach (double currentTime in new[] { targetTime - 2, targetTime - 1, targetTime, targetTime + 0.5 })
+    {
+        Near(
+            NoteTravel.GetProgress(timing, targetTick, currentTime, 2),
+            visualSpeed.GetProgress(targetTick, currentTime, 2));
+    }
+}
+
+static void TestVisualSpeedChanges()
+{
+    var timing = new TimingMap(0, 120);
+    var visualSpeed = new VisualSpeedMap(timing, new[]
+    {
+        new VisualSpeedEvent(1920, 2),
+        new VisualSpeedEvent(3840, 0.5),
+    });
+
+    Near(1.75, visualSpeed.GetVisualDistanceSeconds(0, 1.5));
+    Near(-1.75, visualSpeed.GetVisualDistanceSeconds(1.5, 0));
+    Near(0.125, visualSpeed.GetProgress(5760, 0, 2));
+    Near(-0.75, visualSpeed.GetProgress(5760, 0, 2, 2));
+}
+
+static void TestVisualSpeedStopsAndReverse()
+{
+    var timing = new TimingMap(0, 120);
+    var visualSpeed = new VisualSpeedMap(timing, new[]
+    {
+        new VisualSpeedEvent(1920, 0),
+        new VisualSpeedEvent(3840, -1),
+        new VisualSpeedEvent(5760, 1),
+    });
+
+    Near(0, visualSpeed.GetVisualDistanceSeconds(0.5, 1));
+    Near(-0.5, visualSpeed.GetVisualDistanceSeconds(1, 1.5));
+    Near(1, visualSpeed.GetProgress(3840, 0.6, 0.45));
+}
+
+static void TestVisualSpeedValidation()
+{
+    var timing = new TimingMap(0, 120);
+    Throws<ArgumentOutOfRangeException>(() => new VisualSpeedMap(timing, new[]
+    {
+        new VisualSpeedEvent(-1, 1),
+    }));
+    Throws<ArgumentOutOfRangeException>(() => new VisualSpeedMap(timing, new[]
+    {
+        new VisualSpeedEvent(0, double.NaN),
+    }));
+    Throws<ArgumentException>(() => new VisualSpeedMap(timing, new[]
+    {
+        new VisualSpeedEvent(0, 1),
+        new VisualSpeedEvent(0, 2),
+    }));
+
+    var visualSpeed = new VisualSpeedMap(timing);
+    Throws<ArgumentOutOfRangeException>(() => visualSpeed.GetProgress(0, 0, 1, 0));
+}
+
+static void TestGameplayTimingOffsets()
+{
+    var offsets = new GameplayTimingOffsets(25, -10);
+    Near(1.025, offsets.AdjustAudioTime(1));
+    Near(1.015, offsets.AdjustInputTime(1));
+    Throws<ArgumentOutOfRangeException>(() =>
+        new GameplayTimingOffsets(double.NaN, 0));
+    Throws<ArgumentOutOfRangeException>(() => offsets.AdjustAudioTime(double.PositiveInfinity));
+}
+
+static void TestChartVisualSpeedParsing()
+{
+    const string valid = """
+        {
+          "formatVersion": 1,
+          "chartId": "sv-test",
+          "difficulty": { "name": "Test", "level": 1 },
+          "charter": "Tester",
+          "visualSpeedEvents": [
+            { "tick": 1920, "multiplier": -1 },
+            { "tick": 0, "multiplier": 0 }
+          ],
+          "objects": [
+            { "objectId": 1, "type": "click", "inputType": "rel", "tick": 0, "lane": 0, "width": 1 }
+          ]
+        }
+        """;
+    ChartDefinition chart = SongPackageLoader.ParseChart(valid);
+    Equal(2, chart.VisualSpeedEvents.Count);
+    Equal(new VisualSpeedEvent(0, 0), chart.VisualSpeedEvents[0]);
+    Equal(new VisualSpeedEvent(1920, -1), chart.VisualSpeedEvents[1]);
+
+    string duplicate = valid.Replace(
+        "{ \"tick\": 1920, \"multiplier\": -1 },",
+        "{ \"tick\": 0, \"multiplier\": -1 },");
+    Throws<InvalidDataException>(() => SongPackageLoader.ParseChart(duplicate));
+}
+
 static void TestPlayfieldAcceleration()
 {
     Near(Math.Pow(0.9, 2.3), PlayfieldPresentation.ApplyAcceleration(0.9, 2.3));
@@ -587,6 +697,34 @@ static void TestGameplaySessionMisses()
     session.CompleteNormally(2);
     Equal(true, session.IsNormallyCompleted);
     Equal(CompletionMark.None, session.Snapshot().HighestCompletionMark);
+}
+
+static void TestGameplayInputOffset()
+{
+    var timing = new TimingMap(0, 120);
+    var session = new ClickGameplaySession(timing, new[]
+    {
+        new ClickScoringObject(1, 1920, InputCategory.Rel,
+            InputRequirement.Rel(RelRegion.Left)),
+    }, new JudgmentEvaluator(JudgmentWindows.Default), inputOffsetMilliseconds: 20);
+
+    session.AdvanceTime(0.48);
+    IReadOnlyList<GameplayJudgment> judgments = session.JudgeBatch(
+        0.48,
+        new[] { new PressEvent(1, LogicalChannel.RelLeft) });
+    Equal(1, judgments.Count);
+    Equal(Judgment.StrictlyPrecise, judgments[0].Judgment);
+    Equal(TimingDirection.Exact, judgments[0].Direction);
+
+    Throws<ArgumentOutOfRangeException>(() => new ClickGameplaySession(
+        timing,
+        new[]
+        {
+            new ClickScoringObject(2, 1920, InputCategory.Rel,
+                InputRequirement.Rel(RelRegion.Left)),
+        },
+        new JudgmentEvaluator(JudgmentWindows.Default),
+        inputOffsetMilliseconds: double.NaN));
 }
 
 static void TestInputGroupingProtection()

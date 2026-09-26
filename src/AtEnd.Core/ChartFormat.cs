@@ -254,7 +254,7 @@ public static class SongPackageLoader
         VisualSpeedEvent[] speedEvents = (dto.VisualSpeedEvents ?? Array.Empty<VisualSpeedEventDto>())
             .Select((item, index) =>
             {
-                if (item.Tick < 0 || !double.IsFinite(item.Multiplier) || item.Multiplier <= 0)
+                if (item.Tick < 0 || !double.IsFinite(item.Multiplier))
                 {
                     throw new InvalidDataException($"visualSpeedEvents[{index}] is invalid.");
                 }
@@ -263,6 +263,10 @@ public static class SongPackageLoader
             })
             .OrderBy(item => item.Tick)
             .ToArray();
+        if (speedEvents.Select(item => item.Tick).Distinct().Count() != speedEvents.Length)
+        {
+            throw new InvalidDataException("Visual speed events cannot share a tick.");
+        }
 
         return new ChartDefinition(
             dto.FormatVersion,
