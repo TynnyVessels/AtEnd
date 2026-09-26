@@ -37,6 +37,15 @@ public partial class Main : Control
     private TextureRect? _selectionJacket;
     private Button? _selectionSongButton;
     private Button? _selectionStartButton;
+    private Control? _resultOverlay;
+    private Label? _resultSongTitle;
+    private Label? _resultMark;
+    private Label? _resultScore;
+    private Label? _resultAccuracy;
+    private Label? _resultDetails;
+    private Label? _resultJudgments;
+    private Button? _resultRetryButton;
+    private Button? _resultBackButton;
     private SongPackageDefinition? _selectedPackage;
     private ChartDefinition? _selectedChart;
 
@@ -61,6 +70,17 @@ public partial class Main : Control
         _selectionSongButton = GetNode<Button>("SongSelectOverlay/Panel/SongList/SongButton");
         _selectionStartButton = GetNode<Button>("SongSelectOverlay/Panel/StartButton");
         _selectionStartButton.Pressed += StartSelectedSong;
+        _resultOverlay = GetNode<Control>("ResultOverlay");
+        _resultSongTitle = GetNode<Label>("ResultOverlay/Panel/SongTitle");
+        _resultMark = GetNode<Label>("ResultOverlay/Panel/CompletionMark");
+        _resultScore = GetNode<Label>("ResultOverlay/Panel/Score");
+        _resultAccuracy = GetNode<Label>("ResultOverlay/Panel/Accuracy");
+        _resultDetails = GetNode<Label>("ResultOverlay/Panel/Details");
+        _resultJudgments = GetNode<Label>("ResultOverlay/Panel/Judgments");
+        _resultRetryButton = GetNode<Button>("ResultOverlay/Panel/RetryButton");
+        _resultBackButton = GetNode<Button>("ResultOverlay/Panel/BackButton");
+        _resultRetryButton.Pressed += RetrySelectedSong;
+        _resultBackButton.Pressed += ReturnToSongSelect;
         _playfield.IsRequirementHeld = _keyboardInput.IsRequirementHeld;
         _playfield.JudgmentResolved += OnJudgmentResolved;
         _playfield.CycleCompleted += OnCycleCompleted;
@@ -69,6 +89,7 @@ public partial class Main : Control
         bool demoSmokeTest = Array.IndexOf(arguments, "--smoke-test") >= 0;
         bool songSmokeTest = Array.IndexOf(arguments, "--song-smoke-test") >= 0;
         bool selectionSmokeTest = Array.IndexOf(arguments, "--selection-smoke-test") >= 0;
+        bool resultSmokeTest = Array.IndexOf(arguments, "--result-smoke-test") >= 0;
         if (demoSmokeTest)
         {
             CurrentFlowState = AppFlowState.Playing;
@@ -80,6 +101,10 @@ public partial class Main : Control
             if (songSmokeTest)
             {
                 StartSelectedSong();
+            }
+            else if (resultSmokeTest)
+            {
+                RunResultSmokeTest();
             }
             else
             {
@@ -194,11 +219,17 @@ public partial class Main : Control
 
         try
         {
+            _keyboardInput.ReleaseAll();
             _playfield.StartSong(_selectedPackage, _selectedChart.ChartId);
             CurrentFlowState = AppFlowState.Playing;
             if (_songSelectOverlay is not null)
             {
                 _songSelectOverlay.Visible = false;
+            }
+
+            if (_resultOverlay is not null)
+            {
+                _resultOverlay.Visible = false;
             }
 
             UpdateSongInfo();
@@ -217,6 +248,11 @@ public partial class Main : Control
         if (_songSelectOverlay is not null)
         {
             _songSelectOverlay.Visible = true;
+        }
+
+        if (_resultOverlay is not null)
+        {
+            _resultOverlay.Visible = false;
         }
     }
 
@@ -254,6 +290,31 @@ public partial class Main : Control
         GetTree().Quit(valid ? 0 : 1);
     }
 
+    private void RunResultSmokeTest()
+    {
+        var scoreRun = new ScoreRun(1, 0);
+        scoreRun.Add(InputCategory.Rel, Judgment.StrictlyPrecise);
+        scoreRun.CompleteNormally();
+        ScoreSnapshot score = scoreRun.Snapshot();
+        ShowResult(score);
+
+        bool valid = CurrentFlowState == AppFlowState.Result
+            && _playfield?.PlaybackState == SongPlaybackState.Idle
+            && _resultOverlay?.Visible == true
+            && _resultScore?.Text == "1,000,001"
+            && _resultMark?.Text == "ALL STRICTLY PRECISE";
+        if (valid)
+        {
+            GD.Print("Result smoke test passed: score data displayed while playback remains idle.");
+        }
+        else
+        {
+            GD.PushError("Result smoke test failed.");
+        }
+
+        GetTree().Quit(valid ? 0 : 1);
+    }
+
     public override void _Input(InputEvent @event)
     {
         if (@event is not InputEventKey keyEvent)
@@ -266,6 +327,22 @@ public partial class Main : Control
             if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Enter)
             {
                 StartSelectedSong();
+                GetViewport().SetInputAsHandled();
+            }
+
+            return;
+        }
+
+        if (CurrentFlowState == AppFlowState.Result)
+        {
+            if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Enter)
+            {
+                RetrySelectedSong();
+                GetViewport().SetInputAsHandled();
+            }
+            else if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Escape)
+            {
+                ReturnToSongSelect();
                 GetViewport().SetInputAsHandled();
             }
 
@@ -346,8 +423,66 @@ public partial class Main : Control
 
     private void OnSongCompleted(ScoreSnapshot score)
     {
-        CurrentFlowState = AppFlowState.Result;
+        _keyboardInput.ReleaseAll();
         UpdateScore(score);
+        ShowResult(score);
+    }
+
+    private void ShowResult(ScoreSnapshot score)
+    {
+        CurrentFlowState = AppFlowState.Result;
+        if (_resultOverlay is not null)
+        {
+            _resultOverlay.Visible = true;
+        }
+
+        if (_resultSongTitle is not null)
+        {
+            _resultSongTitle.Text = _selectedPackage?.Song.Title ?? "Unknown Song";
+        }
+
+        if (_resultMark is not null)
+        {
+            _resultMark.Text = score.HighestCompletionMark.DisplayName() ?? "COMPLETED";
+        }
+
+        if (_resultScore is not null)
+        {
+            _resultScore.Text = score.TotalScore.ToString("N0");
+        }
+
+        if (_resultAccuracy is not null)
+        {
+            _resultAccuracy.Text = $"ACCURACY  {score.AccuracyPercent:F2}%";
+        }
+
+        if (_resultDetails is not null)
+        {
+            _resultDetails.Text = $"SP BONUS  {score.StrictlyPreciseBonus:N0}"
+                + $"     MAX COMBO  {score.MaximumCombo:N0}";
+        }
+
+        if (_resultJudgments is not null)
+        {
+            _resultJudgments.Text =
+                $"STRICTLY PRECISE  {score.StrictlyPreciseCount:N0}\n"
+                + $"PRECISE           {score.PreciseCount:N0}\n"
+                + $"MISALIGNED        {score.MisalignedCount:N0}\n"
+                + $"CHAOTIC           {score.ChaoticCount:N0}";
+        }
+    }
+
+    private void RetrySelectedSong()
+    {
+        StartSelectedSong();
+    }
+
+    private void ReturnToSongSelect()
+    {
+        _keyboardInput.ReleaseAll();
+        _playfield?.StopSong();
+        ShowSongSelect();
+        UpdateScore(default);
     }
 
     private void UpdateSongInfo()

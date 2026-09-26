@@ -170,6 +170,10 @@ static void TestComboReset()
     ScoreSnapshot score = run.Snapshot();
     Equal(1, score.CurrentCombo);
     Equal(2, score.MaximumCombo);
+    Equal(0, score.StrictlyPreciseCount);
+    Equal(2, score.PreciseCount);
+    Equal(1, score.MisalignedCount);
+    Equal(1, score.ChaoticCount);
 }
 
 static void TestCompletionMarks()
@@ -449,6 +453,10 @@ static void TestPhysicalInputState()
 
     PressEvent third = input.Press("A")!.Value;
     Equal(second.EventId + 1, third.EventId);
+    input.Press("1");
+    input.ReleaseAll();
+    Equal(false, input.IsChannelHeld(LogicalChannel.RelLeft));
+    Equal(false, input.IsChannelHeld(LogicalChannel.DrmRed));
 }
 
 static void TestInvalidInputData()

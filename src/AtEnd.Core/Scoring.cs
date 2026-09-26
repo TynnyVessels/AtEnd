@@ -44,6 +44,10 @@ public readonly record struct ScoreSnapshot(
     int MaximumCombo,
     int JudgedCount,
     int TotalObjects,
+    int StrictlyPreciseCount,
+    int PreciseCount,
+    int MisalignedCount,
+    int ChaoticCount,
     bool IsNormallyCompleted,
     CompletionMark HighestCompletionMark);
 
@@ -180,7 +184,8 @@ public sealed class ScoreRun
 
         return new ScoreSnapshot(relScore, drmScore, baseScore, _strictlyPrecise,
             checked(baseScore + _strictlyPrecise), accuracy, _currentCombo, _maximumCombo,
-            JudgedCount, TotalObjects, _normallyCompleted, mark);
+            JudgedCount, TotalObjects, _strictlyPrecise, _precise, _misaligned, _chaotic,
+            _normallyCompleted, mark);
     }
 
     private static int CalculatePool(int pool, int earnedUnits, int objectCount, bool completed)

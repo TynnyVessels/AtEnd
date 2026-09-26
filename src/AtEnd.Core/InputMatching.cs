@@ -234,6 +234,8 @@ public sealed class LogicalInputState<TPhysicalKey> where TPhysicalKey : notnull
 
     public bool Release(TPhysicalKey physicalKey) => _heldKeys.Remove(physicalKey);
 
+    public void ReleaseAll() => _heldKeys.Clear();
+
     public bool IsChannelHeld(LogicalChannel channel)
     {
         if (!Enum.IsDefined(channel))

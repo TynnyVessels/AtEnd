@@ -95,6 +95,8 @@ public sealed class GodotKeyboardInput
     public bool IsRequirementHeld(InputRequirement requirement) =>
         _state.IsRequirementHeld(requirement);
 
+    public void ReleaseAll() => _state.ReleaseAll();
+
     private static IReadOnlyDictionary<GodotPhysicalKey, LogicalChannel> GodotBindings { get; } =
         CreateGodotBindings();
 
