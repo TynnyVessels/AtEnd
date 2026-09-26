@@ -27,6 +27,10 @@ var tests = new (string Name, Action Body)[]
     ("Physical input state filters repeats and tracks holds", TestPhysicalInputState),
     ("Input batches validate identifiers and enum values", TestInvalidInputData),
     ("Note travel uses absolute audio time", TestNoteTravel),
+    ("Playfield acceleration remains continuous past judgment", TestPlayfieldAcceleration),
+    ("Playfield note visibility preserves misses", TestPlayfieldNoteVisibility),
+    ("Caught hold slices clip at the judgment line", TestCaughtHoldSliceClipping),
+    ("Released hold slices remain visible past judgment", TestReleasedHoldSliceVisibility),
     ("Gameplay session judges batches and scores hits", TestGameplaySessionHits),
     ("Gameplay session auto-misses overdue objects", TestGameplaySessionMisses),
     ("Input grouping protects later same-channel notes", TestInputGroupingProtection),
@@ -481,6 +485,49 @@ static void TestNoteTravel()
         NoteTravel.GetProgress(timing, targetTick, double.NaN, 2));
     Throws<ArgumentOutOfRangeException>(() =>
         NoteTravel.GetProgress(timing, targetTick, 0, 0));
+}
+
+static void TestPlayfieldAcceleration()
+{
+    Near(Math.Pow(0.9, 2.3), PlayfieldPresentation.ApplyAcceleration(0.9, 2.3));
+    Near(1, PlayfieldPresentation.ApplyAcceleration(1, 2.3));
+    Near(Math.Pow(1.1, 2.3), PlayfieldPresentation.ApplyAcceleration(1.1, 2.3));
+    Near(0, PlayfieldPresentation.ApplyAcceleration(-0.1, 2.3));
+    Throws<ArgumentOutOfRangeException>(() =>
+        PlayfieldPresentation.ApplyAcceleration(double.NaN, 2.3));
+    Throws<ArgumentOutOfRangeException>(() =>
+        PlayfieldPresentation.ApplyAcceleration(1, 0));
+}
+
+static void TestPlayfieldNoteVisibility()
+{
+    Equal(true, PlayfieldPresentation.IsProgressVisible(0, 1.17));
+    Equal(true, PlayfieldPresentation.IsProgressVisible(1.17, 1.17));
+    Equal(false, PlayfieldPresentation.IsProgressVisible(-0.001, 1.17));
+    Equal(false, PlayfieldPresentation.IsProgressVisible(1.171, 1.17));
+    Equal(true, PlayfieldPresentation.ShouldRenderNoteHead(false, false));
+    Equal(false, PlayfieldPresentation.ShouldRenderNoteHead(true, false));
+    Equal(true, PlayfieldPresentation.ShouldRenderNoteHead(true, true));
+}
+
+static void TestCaughtHoldSliceClipping()
+{
+    Equal(HoldSliceClipMode.None,
+        PlayfieldPresentation.GetHoldSliceClipMode(0.8, 0.9, true));
+    Equal(HoldSliceClipMode.ClipFrom,
+        PlayfieldPresentation.GetHoldSliceClipMode(1.1, 0.9, true));
+    Equal(HoldSliceClipMode.ClipTo,
+        PlayfieldPresentation.GetHoldSliceClipMode(0.9, 1.1, true));
+    Equal(HoldSliceClipMode.Hidden,
+        PlayfieldPresentation.GetHoldSliceClipMode(1, 1.1, true));
+}
+
+static void TestReleasedHoldSliceVisibility()
+{
+    Equal(HoldSliceClipMode.None,
+        PlayfieldPresentation.GetHoldSliceClipMode(1.1, 1.2, false));
+    Equal(HoldSliceClipMode.None,
+        PlayfieldPresentation.GetHoldSliceClipMode(1.1, 0.9, false));
 }
 
 static void TestGameplaySessionHits()
