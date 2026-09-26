@@ -10,6 +10,8 @@ namespace AtEnd.App.Playfield;
 
 public partial class PlayfieldView : Control
 {
+    private const string DefaultSongPackagePath = "res://songs/test-song";
+    private const string DefaultChartId = "test-song-test";
     private static readonly TimingMap DemoTiming = new(0.35, 120,
         new[] { new BpmChange(5760, 180) }); //测试谱面信息
     private static readonly RuntimeNote[] DemoNotes =
@@ -64,6 +66,8 @@ public partial class PlayfieldView : Control
 
     public ScoreSnapshot CurrentScore => _gameplaySession?.Snapshot() ?? default;
 
+    public string? LoadedSongId { get; private set; }
+    public string? LoadedChartId { get; private set; }
     public string LoadedSongTitle { get; private set; } = "AtEnd";
     public string LoadedSongArtist { get; private set; } = "Development Track";
     public string LoadedDifficulty { get; private set; } = "Prototype";
@@ -95,7 +99,7 @@ public partial class PlayfieldView : Control
         }
         else
         {
-            LoadTestSong();
+            StartSong(DefaultSongPackagePath, DefaultChartId);
         }
 
         Resized += QueueRedraw;
@@ -191,6 +195,72 @@ public partial class PlayfieldView : Control
             totalAudioTime - (cycle * DemoCycleSeconds)));
     }
 
+    public void StartSong(string packageDirectoryPath, string chartId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(packageDirectoryPath);
+        string filesystemPath = packageDirectoryPath.StartsWith("res://", StringComparison.Ordinal)
+            || packageDirectoryPath.StartsWith("user://", StringComparison.Ordinal)
+            ? ProjectSettings.GlobalizePath(packageDirectoryPath)
+            : packageDirectoryPath;
+        StartSong(SongPackageLoader.LoadDirectory(filesystemPath), chartId);
+    }
+
+    public void StartSong(SongPackageDefinition package, string chartId)
+    {
+        ArgumentNullException.ThrowIfNull(package);
+        ArgumentException.ThrowIfNullOrWhiteSpace(chartId);
+        if (_audioPlayer is null)
+        {
+            throw new InvalidOperationException("The audio player is not available.");
+        }
+
+        ChartDefinition? chart = package.Charts
+            .SingleOrDefault(item => item.ChartId == chartId);
+        if (chart is null)
+        {
+            throw new InvalidDataException(
+                $"Song package '{package.Song.SongId}' does not contain chart '{chartId}'.");
+        }
+
+        string audioFilePath = Path.Combine(package.DirectoryPath, package.Song.AudioFile);
+        AudioStream stream = AudioStreamOggVorbis.LoadFromFile(audioFilePath)
+            ?? throw new InvalidDataException($"Godot could not load {audioFilePath}.");
+
+        _audioPlayer.Stop();
+        _audioClock = null;
+        _audioPlayer.Stream = null;
+        _pendingPresses.Clear();
+        _missedNoteIds.Clear();
+        _songCompleted = false;
+        _activeCycle = -1;
+        _completedCycleCount = 0;
+
+        _activeTiming = package.Timing.TimingMap;
+        _activeVisualSpeed = new VisualSpeedMap(_activeTiming, chart.VisualSpeedEvents);
+        _activeClickObjects = chart.CreateHeadScoringObjects().ToArray();
+        _activeHoldPoints = chart.CreateHoldScoringPoints().ToArray();
+        _activeNotes = chart.Objects.Select(ToRuntimeNote).ToArray();
+        _activeHolds = chart.Objects
+            .Where(item => item.Type == ChartObjectType.Hold)
+            .Select(ToRuntimeHold)
+            .ToArray();
+        _gameplaySession = CreateActiveGameplaySession();
+        LoadedSongId = package.Song.SongId;
+        LoadedChartId = chart.ChartId;
+        LoadedSongTitle = package.Song.Title;
+        LoadedSongArtist = package.Song.Artist;
+        LoadedDifficulty = $"{chart.Difficulty.Name}  {chart.Difficulty.Level}";
+        LoadedCharter = chart.Charter;
+
+        _audioPlayer.Stream = stream;
+        _audioPlayer.VolumeDb = 0;
+        _audioPlayer.Play();
+        _audioClock = new GodotAudioClock(_audioPlayer);
+        GD.Print($"Loaded {chart.ChartId}: {chart.Objects.Count} objects, "
+            + $"{package.Timing.TimingMap.InitialBeatsPerMinute:F3} BPM, "
+            + $"tick zero at {package.Timing.TimingMap.AudioTimeAtTickZeroSeconds:F6}s.");
+    }
+
     private void StopAudioClock()
     {
         _audioPlayer?.Stop();
@@ -203,43 +273,6 @@ public partial class PlayfieldView : Control
         _audioPlayer = null;
         _silentAudioStream?.Dispose();
         _silentAudioStream = null;
-    }
-
-    private void LoadTestSong()
-    {
-        if (_audioPlayer is null)
-        {
-            throw new InvalidOperationException("The audio player is not available.");
-        }
-
-        string packagePath = ProjectSettings.GlobalizePath("res://songs/test-song");
-        SongPackageDefinition package = SongPackageLoader.LoadDirectory(packagePath);
-        ChartDefinition chart = package.Charts.Single(item => item.ChartId == "test-song-test");
-        _activeTiming = package.Timing.TimingMap;
-        _activeVisualSpeed = new VisualSpeedMap(_activeTiming, chart.VisualSpeedEvents);
-        _activeClickObjects = chart.CreateHeadScoringObjects().ToArray();
-        _activeHoldPoints = chart.CreateHoldScoringPoints().ToArray();
-        _activeNotes = chart.Objects.Select(ToRuntimeNote).ToArray();
-        _activeHolds = chart.Objects
-            .Where(item => item.Type == ChartObjectType.Hold)
-            .Select(ToRuntimeHold)
-            .ToArray();
-        _gameplaySession = CreateActiveGameplaySession();
-        LoadedSongTitle = package.Song.Title;
-        LoadedSongArtist = package.Song.Artist;
-        LoadedDifficulty = $"{chart.Difficulty.Name}  {chart.Difficulty.Level}";
-        LoadedCharter = chart.Charter;
-
-        string audioFilePath = Path.Combine(packagePath, package.Song.AudioFile);
-        AudioStream stream = AudioStreamOggVorbis.LoadFromFile(audioFilePath)
-            ?? throw new InvalidDataException($"Godot could not load {audioFilePath}.");
-        _audioPlayer.Stream = stream;
-        _audioPlayer.VolumeDb = 0;
-        _audioPlayer.Play();
-        _audioClock = new GodotAudioClock(_audioPlayer);
-        GD.Print($"Loaded {chart.ChartId}: {chart.Objects.Count} objects, "
-            + $"{package.Timing.TimingMap.InitialBeatsPerMinute:F3} BPM, "
-            + $"tick zero at {package.Timing.TimingMap.AudioTimeAtTickZeroSeconds:F6}s.");
     }
 
     private void UpdateDemoGameplay()
