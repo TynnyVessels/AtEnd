@@ -1,3 +1,4 @@
+using System;
 using AtEnd.App.Input;
 using AtEnd.App.Playfield;
 using AtEnd.Core;
@@ -5,8 +6,18 @@ using Godot;
 
 namespace AtEnd.App;
 
+public enum AppFlowState
+{
+    SongSelect,
+    Playing,
+    Result,
+}
+
 public partial class Main : Control
 {
+    private const string DefaultSongPackagePath = "res://songs/test-song";
+    private const string DefaultChartId = "test-song-test";
+
     private readonly GodotKeyboardInput _keyboardInput = new();
     private Label? _inputStatus;
     private RichTextLabel? _judgmentStatus;
@@ -14,6 +25,8 @@ public partial class Main : Control
     private Label? _title;
     private PlayfieldView? _playfield;
     private Tween? _judgmentFadeTween;
+
+    public AppFlowState CurrentFlowState { get; private set; } = AppFlowState.SongSelect;
 
     public override void _Ready()
     {
@@ -23,14 +36,32 @@ public partial class Main : Control
         _title = GetNode<Label>("Title");
         _playfield = GetNode<PlayfieldView>("Playfield");
         _playfield.IsRequirementHeld = _keyboardInput.IsRequirementHeld;
-        _title.Text = $"{_playfield.LoadedSongTitle}\n"
-            + $"{_playfield.LoadedSongArtist}\n"
-            + $"{_playfield.LoadedDifficulty}\n"
-            + $"{_playfield.LoadedCharter}";
         _playfield.JudgmentResolved += OnJudgmentResolved;
         _playfield.CycleCompleted += OnCycleCompleted;
+        _playfield.SongCompleted += OnSongCompleted;
+        if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--smoke-test") >= 0)
+        {
+            CurrentFlowState = AppFlowState.Playing;
+        }
+        else
+        {
+            StartSong(DefaultSongPackagePath, DefaultChartId);
+        }
+
+        UpdateSongInfo();
         UpdateScore(_playfield.CurrentScore);
         GD.Print("AtEnd development shell is ready.");
+    }
+
+    private void StartSong(string packageDirectoryPath, string chartId)
+    {
+        if (_playfield is null)
+        {
+            throw new InvalidOperationException("The playfield is not available.");
+        }
+
+        _playfield.StartSong(packageDirectoryPath, chartId);
+        CurrentFlowState = AppFlowState.Playing;
     }
 
     public override void _Input(InputEvent @event)
@@ -105,6 +136,25 @@ public partial class Main : Control
     private void OnCycleCompleted(ScoreSnapshot score)
     {
         UpdateScore(score);
+    }
+
+    private void OnSongCompleted(ScoreSnapshot score)
+    {
+        CurrentFlowState = AppFlowState.Result;
+        UpdateScore(score);
+    }
+
+    private void UpdateSongInfo()
+    {
+        if (_title is null || _playfield is null)
+        {
+            return;
+        }
+
+        _title.Text = $"{_playfield.LoadedSongTitle}\n"
+            + $"{_playfield.LoadedSongArtist}\n"
+            + $"{_playfield.LoadedDifficulty}\n"
+            + $"{_playfield.LoadedCharter}";
     }
 
     private void UpdateScore(ScoreSnapshot score)

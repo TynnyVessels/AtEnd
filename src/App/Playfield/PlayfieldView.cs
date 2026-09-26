@@ -8,10 +8,15 @@ using Godot;
 
 namespace AtEnd.App.Playfield;
 
+public enum SongPlaybackState
+{
+    Idle,
+    Playing,
+    Completed,
+}
+
 public partial class PlayfieldView : Control
 {
-    private const string DefaultSongPackagePath = "res://songs/test-song";
-    private const string DefaultChartId = "test-song-test";
     private static readonly TimingMap DemoTiming = new(0.35, 120,
         new[] { new BpmChange(5760, 180) }); //测试谱面信息
     private static readonly RuntimeNote[] DemoNotes =
@@ -61,10 +66,13 @@ public partial class PlayfieldView : Control
 
     public event Action<GameplayJudgment, ScoreSnapshot>? JudgmentResolved;
     public event Action<ScoreSnapshot>? CycleCompleted;
+    public event Action<ScoreSnapshot>? SongCompleted;
+    public event Action<SongPlaybackState>? PlaybackStateChanged;
 
     public Func<InputRequirement, bool>? IsRequirementHeld { get; set; }
 
     public ScoreSnapshot CurrentScore => _gameplaySession?.Snapshot() ?? default;
+    public SongPlaybackState PlaybackState { get; private set; } = SongPlaybackState.Idle;
 
     public string? LoadedSongId { get; private set; }
     public string? LoadedChartId { get; private set; }
@@ -96,10 +104,7 @@ public partial class PlayfieldView : Control
             _audioPlayer.Play();
             _audioClock = new GodotAudioClock(_audioPlayer);
             EnsureCycle(0);
-        }
-        else
-        {
-            StartSong(DefaultSongPackagePath, DefaultChartId);
+            SetPlaybackState(SongPlaybackState.Playing);
         }
 
         Resized += QueueRedraw;
@@ -179,6 +184,11 @@ public partial class PlayfieldView : Control
 
     public void QueuePress(PressEvent pressEvent)
     {
+        if (PlaybackState != SongPlaybackState.Playing)
+        {
+            return;
+        }
+
         double rawAudioTime = _audioClock?.CurrentTimeSeconds ?? 0;
         // Input compensation belongs to judgment error calculation, not the session clock.
         double totalAudioTime = TimingOffsets.AdjustAudioTime(rawAudioTime);
@@ -256,12 +266,13 @@ public partial class PlayfieldView : Control
         _audioPlayer.VolumeDb = 0;
         _audioPlayer.Play();
         _audioClock = new GodotAudioClock(_audioPlayer);
+        SetPlaybackState(SongPlaybackState.Playing);
         GD.Print($"Loaded {chart.ChartId}: {chart.Objects.Count} objects, "
             + $"{package.Timing.TimingMap.InitialBeatsPerMinute:F3} BPM, "
             + $"tick zero at {package.Timing.TimingMap.AudioTimeAtTickZeroSeconds:F6}s.");
     }
 
-    private void StopAudioClock()
+    public void StopSong()
     {
         _audioPlayer?.Stop();
         if (_audioPlayer is not null)
@@ -270,6 +281,21 @@ public partial class PlayfieldView : Control
         }
 
         _audioClock = null;
+        _pendingPresses.Clear();
+        _missedNoteIds.Clear();
+        _gameplaySession = null;
+        _activeNotes = Array.Empty<RuntimeNote>();
+        _activeHolds = Array.Empty<RuntimeHold>();
+        _activeClickObjects = Array.Empty<ClickScoringObject>();
+        _activeHoldPoints = Array.Empty<HoldScoringPoint>();
+        _songCompleted = false;
+        SetPlaybackState(SongPlaybackState.Idle);
+        QueueRedraw();
+    }
+
+    private void StopAudioClock()
+    {
+        StopSong();
         _audioPlayer = null;
         _silentAudioStream?.Dispose();
         _silentAudioStream = null;
@@ -301,7 +327,10 @@ public partial class PlayfieldView : Control
 
     private void UpdateSongGameplay()
     {
-        if (_audioClock is null || _audioPlayer is null || _gameplaySession is null)
+        if (PlaybackState != SongPlaybackState.Playing
+            || _audioClock is null
+            || _audioPlayer is null
+            || _gameplaySession is null)
         {
             return;
         }
@@ -321,7 +350,9 @@ public partial class PlayfieldView : Control
             double endTime = TimingOffsets.AdjustAudioTime(rawEndTime);
             _gameplaySession.CompleteNormally(Math.Max(audioTime, endTime));
             _songCompleted = true;
-            CycleCompleted?.Invoke(_gameplaySession.Snapshot());
+            ScoreSnapshot score = _gameplaySession.Snapshot();
+            SetPlaybackState(SongPlaybackState.Completed);
+            SongCompleted?.Invoke(score);
         }
     }
 
@@ -384,6 +415,17 @@ public partial class PlayfieldView : Control
 
             JudgmentResolved?.Invoke(judgment, _gameplaySession.Snapshot());
         }
+    }
+
+    private void SetPlaybackState(SongPlaybackState state)
+    {
+        if (PlaybackState == state)
+        {
+            return;
+        }
+
+        PlaybackState = state;
+        PlaybackStateChanged?.Invoke(state);
     }
 
     private static AudioStreamWav CreateSilentLoop()
