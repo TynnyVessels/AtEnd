@@ -10,18 +10,19 @@ namespace AtEnd.App.Playfield;
 
 public partial class PlayfieldView : Control
 {
-    private const int LaneCount = 18;
+    private const int LaneCount = 18; //轨道数
     private const float TrackBackProgress = 0;
-    private const float TrackWindowBottomProgress = 1.12f;
-    private const float NoteHalfDepth = 0.017f;
-    private const float JudgmentLineHalfDepth = 0.0045f;
-    private static readonly Color TrackColor = new("10162b");
-    private static readonly Color TrackEdgeColor = new("6f7fb5");
-    private static readonly Color MinorGridColor = new(0.3f, 0.38f, 0.62f, 0.28f);
-    private static readonly Color MajorGridColor = new(0.5f, 0.62f, 0.92f, 0.7f);
-    private static readonly Color JudgmentLineColor = new("f4f7ff");
+    private const float TrackWindowBottomProgress = 1.12f; //+0.12越过判定线
+    private const float NoteDepthLaneRatio = 0.42f; //note纵深相对单轨宽度，保持贴地透视
+    private const float NoteCullPaddingProgress = 0.05f;
+    private const float JudgmentLineHalfDepth = 0.0045f; //判定线厚度
+    private static readonly Color TrackColor = new("10162b"); //轨道颜色
+    private static readonly Color TrackEdgeColor = new("6f7fb5"); //轨道边缘颜色
+    private static readonly Color MinorGridColor = new(0.3f, 0.38f, 0.62f, 0.28f); //次要网格线颜色
+    private static readonly Color MajorGridColor = new(0.5f, 0.62f, 0.92f, 0.7f); //主要网格线颜色
+    private static readonly Color JudgmentLineColor = new("f4f7ff"); //判定线颜色
     private static readonly TimingMap DemoTiming = new(0.35, 120,
-        new[] { new BpmChange(5760, 180) });
+        new[] { new BpmChange(5760, 180) }); //测试谱面信息
     private static readonly RuntimeNote[] DemoNotes =
     {
         new(1, 2, 4, 1920, InputCategory.Rel,
@@ -82,10 +83,10 @@ public partial class PlayfieldView : Control
     public int GridDensity { get; set; } = 18;
 
     [Export(PropertyHint.Range, "0.4,2.0,0.05")]
-    public double ApproachDurationSeconds { get; set; } = 1.0;
+    public double ApproachDurationSeconds { get; set; } = 0.45;
 
     [Export(PropertyHint.Range, "1.0,3.0,0.05")]
-    public double TravelAccelerationExponent { get; set; } = 2.0;
+    public double TravelAccelerationExponent { get; set; } = 2.3;
 
     public override void _Ready()
     {
@@ -478,11 +479,9 @@ public partial class PlayfieldView : Control
                 note.TargetTick,
                 effectiveAudioTime,
                 ApproachDurationSeconds);
-            if (linearProgress is >= 0 and <= TrackWindowBottomProgress + NoteHalfDepth)
+            if (linearProgress is >= 0 and <= TrackWindowBottomProgress + NoteCullPaddingProgress)
             {
-                float progress = (float)(linearProgress <= 1
-                    ? Math.Pow(linearProgress, TravelAccelerationExponent)
-                    : linearProgress);
+                float progress = AccelerateProgress(linearProgress);
                 DrawNote(note.StartLane, note.LaneWidth, progress, note.Color, note.Symbol);
             }
         }
@@ -494,6 +493,7 @@ public partial class PlayfieldView : Control
         foreach (RuntimeHold hold in _activeHolds)
         {
             ChartObjectDefinition definition = hold.Definition;
+            bool clipAtJudgmentLine = IsHoldCurrentlyCaught(definition, currentAudioTime);
             foreach ((LanePoint first, LanePoint second) in definition.Path.Zip(
                 definition.Path.Skip(1),
                 (first, second) => (first, second)))
@@ -505,17 +505,31 @@ public partial class PlayfieldView : Control
                     double toRatio = (part + 1) / (double)subdivisions;
                     long fromTick = first.Tick + (long)Math.Round((second.Tick - first.Tick) * fromRatio);
                     long toTick = first.Tick + (long)Math.Round((second.Tick - first.Tick) * toRatio);
-                    DrawHoldSlice(hold, fromTick, toTick, currentAudioTime);
+                    DrawHoldSlice(hold, fromTick, toTick, currentAudioTime, clipAtJudgmentLine);
                 }
             }
         }
+    }
+
+    private bool IsHoldCurrentlyCaught(
+        ChartObjectDefinition definition,
+        double currentAudioTime)
+    {
+        double currentTick = _activeTiming.GetTickAtAudioTimeSeconds(currentAudioTime);
+        long requirementTick = (long)Math.Round(Math.Clamp(
+            currentTick,
+            definition.StartTick,
+            definition.EndTick));
+        InputRequirement requirement = definition.GetInputRequirementAtTick(requirementTick);
+        return IsRequirementHeld?.Invoke(requirement) == true;
     }
 
     private void DrawHoldSlice(
         RuntimeHold hold,
         long fromTick,
         long toTick,
-        double currentAudioTime)
+        double currentAudioTime,
+        bool clipAtJudgmentLine)
     {
         double fromLinear = NoteTravel.GetProgress(
             _activeTiming, fromTick, currentAudioTime, ApproachDurationSeconds);
@@ -526,10 +540,38 @@ public partial class PlayfieldView : Control
             return;
         }
 
-        float fromProgress = AccelerateAndClampProgress(fromLinear);
-        float toProgress = AccelerateAndClampProgress(toLinear);
+        if (clipAtJudgmentLine && fromLinear >= 1 && toLinear >= 1)
+        {
+            return;
+        }
+
         (double fromLane, double fromWidth) = hold.Definition.GetLaneGeometryAtTick(fromTick);
         (double toLane, double toWidth) = hold.Definition.GetLaneGeometryAtTick(toTick);
+        if (clipAtJudgmentLine && (fromLinear > 1 || toLinear > 1))
+        {
+            double judgmentTick = _activeTiming.GetTickAtAudioTimeSeconds(currentAudioTime);
+            double clipRatio = Math.Clamp(
+                (judgmentTick - fromTick) / (toTick - (double)fromTick),
+                0,
+                1);
+            double clippedLane = fromLane + ((toLane - fromLane) * clipRatio);
+            double clippedWidth = fromWidth + ((toWidth - fromWidth) * clipRatio);
+            if (fromLinear > 1)
+            {
+                fromLinear = 1;
+                fromLane = clippedLane;
+                fromWidth = clippedWidth;
+            }
+            else
+            {
+                toLinear = 1;
+                toLane = clippedLane;
+                toWidth = clippedWidth;
+            }
+        }
+
+        float fromProgress = AccelerateProgress(fromLinear);
+        float toProgress = AccelerateProgress(toLinear);
         Vector2[] polygon =
         {
             TrackPoint((float)fromLane, fromProgress),
@@ -544,10 +586,10 @@ public partial class PlayfieldView : Control
         DrawLine(polygon[1], polygon[2], new Color(1, 1, 1, 0.55f), 1.5f, true);
     }
 
-    private float AccelerateAndClampProgress(double linearProgress)
+    private float AccelerateProgress(double linearProgress)
     {
-        double clamped = Math.Clamp(linearProgress, 0, 1);
-        return (float)Math.Pow(clamped, TravelAccelerationExponent);
+        double nonNegativeProgress = Math.Max(0, linearProgress);
+        return (float)Math.Pow(nonNegativeProgress, TravelAccelerationExponent);
     }
 
     private static AudioStreamWav CreateSilentLoop()
@@ -569,8 +611,14 @@ public partial class PlayfieldView : Control
 
     private void DrawNote(int startLane, int laneWidth, float progress, Color color, NoteSymbol symbol)
     {
-        float nearProgress = Math.Max(0, progress + NoteHalfDepth);
-        float farProgress = Math.Max(0, progress - NoteHalfDepth);
+        float lanePixelWidth = MathF.Abs(TrackPoint(1, progress).X - TrackPoint(0, progress).X);
+        float halfHeight = lanePixelWidth * NoteDepthLaneRatio / 2;
+        float trackPixelHeight = MathF.Abs(TrackPoint(0, 1).Y - TrackPoint(0, 0).Y);
+        float halfDepthProgress = trackPixelHeight > float.Epsilon
+            ? halfHeight / trackPixelHeight
+            : 0;
+        float farProgress = progress - halfDepthProgress;
+        float nearProgress = progress + halfDepthProgress;
         Vector2[] polygon =
         {
             TrackPoint(startLane, farProgress),
@@ -587,8 +635,10 @@ public partial class PlayfieldView : Control
             return;
         }
 
-        Vector2 center = (TrackPoint(startLane, progress) + TrackPoint(startLane + laneWidth, progress)) / 2;
-        float symbolSize = MathF.Max(5, polygon[1].DistanceTo(polygon[0]) * 0.12f);
+        Vector2 center = (polygon[0] + polygon[1] + polygon[2] + polygon[3]) / 4;
+        float noteWidth = polygon[1].DistanceTo(polygon[0]);
+        float noteHeight = polygon[3].DistanceTo(polygon[0]);
+        float symbolSize = MathF.Max(1, MathF.Min(noteWidth * 0.12f, noteHeight * 0.32f));
         Color symbolColor = new(0.05f, 0.07f, 0.12f, 0.95f);
         switch (symbol)
         {
