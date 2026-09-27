@@ -1,8 +1,10 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AtEnd.App.Input;
 using AtEnd.App.Playfield;
+using AtEnd.App.Settings;
 using AtEnd.Core;
 using Godot;
 
@@ -12,15 +14,16 @@ public enum AppFlowState
 {
     SongSelect,
     Playing,
+    Paused,
     Result,
 }
 
 public partial class Main : Control
 {
-    private const string DefaultSongPackagePath = "res://songs/test-song";
-    private const string DefaultChartId = "test-song-test";
+    private const string SongsDirectoryPath = "res://songs";
 
     private readonly GodotKeyboardInput _keyboardInput = new();
+    private readonly PlayerSettingsStore _settingsStore = new();
     private Label? _inputStatus;
     private RichTextLabel? _judgmentStatus;
     private Label? _scoreStatus;
@@ -35,7 +38,8 @@ public partial class Main : Control
     private Label? _selectionError;
     private Label? _selectionJacketPlaceholder;
     private TextureRect? _selectionJacket;
-    private Button? _selectionSongButton;
+    private VBoxContainer? _selectionSongList;
+    private Label? _selectionHint;
     private Button? _selectionStartButton;
     private Control? _resultOverlay;
     private Label? _resultSongTitle;
@@ -46,8 +50,26 @@ public partial class Main : Control
     private Label? _resultJudgments;
     private Button? _resultRetryButton;
     private Button? _resultBackButton;
+    private Control? _pauseOverlay;
+    private Button? _pauseContinueButton;
+    private Button? _pauseRetryButton;
+    private Button? _pauseExitButton;
+    private Control? _settingsOverlay;
+    private Button? _settingsOpenButton;
+    private HSlider? _settingsSpeedSlider;
+    private Label? _settingsSpeedValue;
+    private SpinBox? _settingsGlobalOffset;
+    private SpinBox? _settingsInputOffset;
+    private OptionButton? _settingsGridDensity;
+    private Label? _settingsError;
+    private Button? _settingsSaveButton;
+    private Button? _settingsCancelButton;
+    private Button? _settingsDefaultsButton;
     private SongPackageDefinition? _selectedPackage;
     private ChartDefinition? _selectedChart;
+    private SongLibraryScanResult? _songLibrary;
+    private readonly List<Button> _selectionSongButtons = new();
+    private PlayerSettings _playerSettings = PlayerSettings.Default;
 
     public AppFlowState CurrentFlowState { get; private set; } = AppFlowState.SongSelect;
 
@@ -67,7 +89,9 @@ public partial class Main : Control
         _selectionJacketPlaceholder =
             GetNode<Label>("SongSelectOverlay/Panel/JacketFrame/JacketPlaceholder");
         _selectionJacket = GetNode<TextureRect>("SongSelectOverlay/Panel/JacketFrame/Jacket");
-        _selectionSongButton = GetNode<Button>("SongSelectOverlay/Panel/SongList/SongButton");
+        _selectionSongList = GetNode<VBoxContainer>(
+            "SongSelectOverlay/Panel/SongList/Scroll/Songs");
+        _selectionHint = GetNode<Label>("SongSelectOverlay/Panel/Hint");
         _selectionStartButton = GetNode<Button>("SongSelectOverlay/Panel/StartButton");
         _selectionStartButton.Pressed += StartSelectedSong;
         _resultOverlay = GetNode<Control>("ResultOverlay");
@@ -81,15 +105,46 @@ public partial class Main : Control
         _resultBackButton = GetNode<Button>("ResultOverlay/Panel/BackButton");
         _resultRetryButton.Pressed += RetrySelectedSong;
         _resultBackButton.Pressed += ReturnToSongSelect;
+        _pauseOverlay = GetNode<Control>("PauseOverlay");
+        _pauseContinueButton = GetNode<Button>("PauseOverlay/Panel/ContinueButton");
+        _pauseRetryButton = GetNode<Button>("PauseOverlay/Panel/RetryButton");
+        _pauseExitButton = GetNode<Button>("PauseOverlay/Panel/ExitButton");
+        _pauseContinueButton.Pressed += ResumeGameplay;
+        _pauseRetryButton.Pressed += RetrySelectedSong;
+        _pauseExitButton.Pressed += ReturnToSongSelect;
+        _settingsOverlay = GetNode<Control>("SettingsOverlay");
+        _settingsOpenButton = GetNode<Button>("SongSelectOverlay/SettingsButton");
+        _settingsSpeedSlider = GetNode<HSlider>("SettingsOverlay/Panel/SpeedSlider");
+        _settingsSpeedValue = GetNode<Label>("SettingsOverlay/Panel/SpeedValue");
+        _settingsGlobalOffset = GetNode<SpinBox>("SettingsOverlay/Panel/GlobalOffset");
+        _settingsInputOffset = GetNode<SpinBox>("SettingsOverlay/Panel/InputOffset");
+        _settingsGridDensity = GetNode<OptionButton>("SettingsOverlay/Panel/GridDensity");
+        _settingsError = GetNode<Label>("SettingsOverlay/Panel/Error");
+        _settingsSaveButton = GetNode<Button>("SettingsOverlay/Panel/SaveButton");
+        _settingsCancelButton = GetNode<Button>("SettingsOverlay/Panel/CancelButton");
+        _settingsDefaultsButton = GetNode<Button>("SettingsOverlay/Panel/DefaultsButton");
+        _settingsOpenButton.Pressed += ShowSettings;
+        _settingsSpeedSlider.ValueChanged += OnSettingsSpeedChanged;
+        _settingsSaveButton.Pressed += SaveSettings;
+        _settingsCancelButton.Pressed += CloseSettings;
+        _settingsDefaultsButton.Pressed += LoadDefaultSettingsControls;
+        _settingsGridDensity.AddItem("3 格", 3);
+        _settingsGridDensity.AddItem("9 格", 9);
+        _settingsGridDensity.AddItem("18 格", 18);
         _playfield.IsRequirementHeld = _keyboardInput.IsRequirementHeld;
         _playfield.JudgmentResolved += OnJudgmentResolved;
         _playfield.CycleCompleted += OnCycleCompleted;
         _playfield.SongCompleted += OnSongCompleted;
+        _playerSettings = _settingsStore.Load();
+        _playfield.ApplyPlayerSettings(_playerSettings);
+        LoadSettingsControls(_playerSettings);
         string[] arguments = OS.GetCmdlineUserArgs();
         bool demoSmokeTest = Array.IndexOf(arguments, "--smoke-test") >= 0;
         bool songSmokeTest = Array.IndexOf(arguments, "--song-smoke-test") >= 0;
         bool selectionSmokeTest = Array.IndexOf(arguments, "--selection-smoke-test") >= 0;
         bool resultSmokeTest = Array.IndexOf(arguments, "--result-smoke-test") >= 0;
+        bool pauseSmokeTest = Array.IndexOf(arguments, "--pause-smoke-test") >= 0;
+        bool settingsSmokeTest = Array.IndexOf(arguments, "--settings-smoke-test") >= 0;
         if (demoSmokeTest)
         {
             CurrentFlowState = AppFlowState.Playing;
@@ -97,14 +152,24 @@ public partial class Main : Control
         }
         else
         {
-            PrepareSongSelection(DefaultSongPackagePath, DefaultChartId);
+            PrepareSongLibrary(SongsDirectoryPath);
             if (songSmokeTest)
             {
                 StartSelectedSong();
             }
+            else if (pauseSmokeTest)
+            {
+                StartSelectedSong();
+                RunPauseSmokeTest();
+            }
             else if (resultSmokeTest)
             {
                 RunResultSmokeTest();
+            }
+            else if (settingsSmokeTest)
+            {
+                ShowSongSelect();
+                RunSettingsSmokeTest();
             }
             else
             {
@@ -120,30 +185,88 @@ public partial class Main : Control
         GD.Print("AtEnd development shell is ready.");
     }
 
-    private void PrepareSongSelection(string packageDirectoryPath, string chartId)
+    private void PrepareSongLibrary(string libraryDirectoryPath)
     {
         try
         {
-            string filesystemPath = ProjectSettings.GlobalizePath(packageDirectoryPath);
-            SongPackageDefinition package = SongPackageLoader.LoadDirectory(filesystemPath);
-            ChartDefinition? chart = package.Charts
-                .SingleOrDefault(item => item.ChartId == chartId);
-            if (chart is null)
+            string filesystemPath = ProjectSettings.GlobalizePath(libraryDirectoryPath);
+            _songLibrary = SongLibraryScanner.ScanDirectory(filesystemPath);
+            PopulateSongList(_songLibrary.Packages);
+            foreach (SongPackageLoadFailure failure in _songLibrary.Failures)
             {
-                throw new InvalidDataException(
-                    $"Song package '{package.Song.SongId}' does not contain chart '{chartId}'.");
+                GD.PushWarning(
+                    $"Skipped song package '{Path.GetFileName(failure.DirectoryPath)}': {failure.Message}");
             }
 
+            if (_songLibrary.Packages.Count == 0)
+            {
+                _selectedPackage = null;
+                _selectedChart = null;
+                ShowSelectionError("No valid song packages were found.");
+                UpdateSongLibraryHint();
+                return;
+            }
+
+            SelectSong(
+                _songLibrary.Packages[0],
+                _songLibrary.Packages[0].Charts[0],
+                _selectionSongButtons[0]);
+        }
+        catch (Exception exception)
+        {
+            _songLibrary = null;
+            _selectedPackage = null;
+            _selectedChart = null;
+            ShowSelectionError(exception.Message);
+        }
+    }
+
+    private void PopulateSongList(IReadOnlyList<SongPackageDefinition> packages)
+    {
+        if (_selectionSongList is null)
+        {
+            return;
+        }
+
+        foreach (Node child in _selectionSongList.GetChildren())
+        {
+            _selectionSongList.RemoveChild(child);
+            child.QueueFree();
+        }
+
+        _selectionSongButtons.Clear();
+        foreach (SongPackageDefinition package in packages)
+        {
+            ChartDefinition chart = package.Charts[0];
+            var button = new Button
+            {
+                Text = package.Song.Title,
+                Alignment = HorizontalAlignment.Left,
+                CustomMinimumSize = new Vector2(0, 52),
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                ToggleMode = true,
+            };
+            button.AddThemeFontSizeOverride("font_size", 16);
+            button.Pressed += () => SelectSong(package, chart, button);
+            _selectionSongList.AddChild(button);
+            _selectionSongButtons.Add(button);
+        }
+
+        UpdateSongLibraryHint();
+    }
+
+    private void SelectSong(
+        SongPackageDefinition package,
+        ChartDefinition chart,
+        Button selectedButton)
+    {
+        try
+        {
             _selectedPackage = package;
             _selectedChart = chart;
-            if (_selectionSongButton is not null)
+            foreach (Button button in _selectionSongButtons)
             {
-                _selectionSongButton.Text = package.Song.Title;
-            }
-
-            if (_selectionSongTitle is not null)
-            {
-                _selectionSongTitle.Text = package.Song.Title;
+                button.SetPressedNoSignal(button == selectedButton);
             }
 
             if (_selectionArtist is not null)
@@ -171,7 +294,7 @@ public partial class Main : Control
 
             if (_selectionError is not null)
             {
-                _selectionError.Visible = false;
+                UpdateSongLibraryWarning();
             }
         }
         catch (Exception exception)
@@ -180,6 +303,36 @@ public partial class Main : Control
             _selectedChart = null;
             ShowSelectionError(exception.Message);
         }
+    }
+
+    private void UpdateSongLibraryHint()
+    {
+        if (_selectionHint is null || _songLibrary is null)
+        {
+            return;
+        }
+
+        _selectionHint.Text = _songLibrary.Failures.Count == 0
+            ? $"{_songLibrary.Packages.Count} SONGS AVAILABLE"
+            : $"{_songLibrary.Packages.Count} AVAILABLE  ·  {_songLibrary.Failures.Count} SKIPPED";
+    }
+
+    private void UpdateSongLibraryWarning()
+    {
+        if (_selectionError is null)
+        {
+            return;
+        }
+
+        if (_songLibrary is null || _songLibrary.Failures.Count == 0)
+        {
+            _selectionError.Visible = false;
+            return;
+        }
+
+        SongPackageLoadFailure first = _songLibrary.Failures[0];
+        _selectionError.Text = $"SKIPPED  ·  {Path.GetFileName(first.DirectoryPath)}  ·  {first.Message}";
+        _selectionError.Visible = true;
     }
 
     private void LoadSelectionJacket(SongPackageDefinition package)
@@ -232,6 +385,11 @@ public partial class Main : Control
                 _resultOverlay.Visible = false;
             }
 
+            if (_pauseOverlay is not null)
+            {
+                _pauseOverlay.Visible = false;
+            }
+
             UpdateSongInfo();
             UpdateScore(_playfield.CurrentScore);
         }
@@ -253,6 +411,11 @@ public partial class Main : Control
         if (_resultOverlay is not null)
         {
             _resultOverlay.Visible = false;
+        }
+
+        if (_pauseOverlay is not null)
+        {
+            _pauseOverlay.Visible = false;
         }
     }
 
@@ -276,11 +439,15 @@ public partial class Main : Control
             && _playfield?.PlaybackState == SongPlaybackState.Idle
             && _songSelectOverlay?.Visible == true
             && _selectionStartButton?.Disabled == false
-            && _selectedPackage is not null
-            && _selectedChart is not null;
+            && _selectedPackage?.Song.SongId == "test-song"
+            && _selectedChart?.ChartId == "test-song-test"
+            && _songLibrary?.Packages.Count == 1
+            && _songLibrary.Failures.Count == 0
+            && _selectionSongButtons.Count == 1;
         if (valid)
         {
-            GD.Print("Song selection smoke test passed: metadata loaded and playback remains idle.");
+            GD.Print(
+                "Song selection smoke test passed: discovered packages populate the dynamic list.");
         }
         else
         {
@@ -315,6 +482,220 @@ public partial class Main : Control
         GetTree().Quit(valid ? 0 : 1);
     }
 
+    private void RunPauseSmokeTest()
+    {
+        PauseGameplay();
+        bool paused = CurrentFlowState == AppFlowState.Paused
+            && _playfield?.PlaybackState == SongPlaybackState.Paused
+            && _playfield.IsAudioPaused
+            && _pauseOverlay?.Visible == true;
+        ResumeGameplay();
+        bool resumed = CurrentFlowState == AppFlowState.Playing
+            && _playfield?.PlaybackState == SongPlaybackState.Playing
+            && !_playfield.IsAudioPaused
+            && _pauseOverlay?.Visible == false;
+        bool valid = paused && resumed;
+        if (valid)
+        {
+            GD.Print("Pause smoke test passed: audio and gameplay pause and resume together.");
+        }
+        else
+        {
+            GD.PushError("Pause smoke test failed.");
+        }
+
+        _playfield?.StopSong();
+        GetTree().Quit(valid ? 0 : 1);
+    }
+
+    private void RunSettingsSmokeTest()
+    {
+        const string smokePath = "user://settings-smoke.cfg";
+        string filesystemPath = ProjectSettings.GlobalizePath(smokePath);
+        bool valid;
+        try
+        {
+            var store = new PlayerSettingsStore(smokePath);
+            var expected = new PlayerSettings(8.5, -40, 25, 9);
+            store.Save(expected);
+            PlayerSettings loaded = store.Load();
+            ShowSettings();
+            LoadSettingsControls(loaded);
+            valid = loaded == expected
+                && _settingsOverlay?.Visible == true
+                && Math.Abs((_settingsSpeedSlider?.Value ?? 0) - 8.5) < 0.0001
+                && _settingsGridDensity is not null
+                && _settingsGridDensity.GetItemId(_settingsGridDensity.Selected) == 9;
+        }
+        finally
+        {
+            if (File.Exists(filesystemPath))
+            {
+                File.Delete(filesystemPath);
+            }
+        }
+
+        if (valid)
+        {
+            GD.Print("Settings smoke test passed: values save, load, and populate controls.");
+        }
+        else
+        {
+            GD.PushError("Settings smoke test failed.");
+        }
+
+        GetTree().Quit(valid ? 0 : 1);
+    }
+
+    private void PauseGameplay()
+    {
+        if (CurrentFlowState != AppFlowState.Playing || _playfield is null)
+        {
+            return;
+        }
+
+        _keyboardInput.ReleaseAll();
+        _playfield.PauseSong();
+        if (_playfield.PlaybackState != SongPlaybackState.Paused)
+        {
+            return;
+        }
+
+        CurrentFlowState = AppFlowState.Paused;
+        if (_pauseOverlay is not null)
+        {
+            _pauseOverlay.Visible = true;
+        }
+    }
+
+    private void ResumeGameplay()
+    {
+        if (CurrentFlowState != AppFlowState.Paused || _playfield is null)
+        {
+            return;
+        }
+
+        _keyboardInput.ReleaseAll();
+        _playfield.ResumeSong();
+        if (_playfield.PlaybackState != SongPlaybackState.Playing)
+        {
+            return;
+        }
+
+        CurrentFlowState = AppFlowState.Playing;
+        if (_pauseOverlay is not null)
+        {
+            _pauseOverlay.Visible = false;
+        }
+    }
+
+    private void ShowSettings()
+    {
+        if (CurrentFlowState != AppFlowState.SongSelect)
+        {
+            return;
+        }
+
+        LoadSettingsControls(_playerSettings);
+        if (_settingsError is not null)
+        {
+            _settingsError.Visible = false;
+        }
+
+        if (_settingsOverlay is not null)
+        {
+            _settingsOverlay.Visible = true;
+        }
+    }
+
+    private void CloseSettings()
+    {
+        LoadSettingsControls(_playerSettings);
+        if (_settingsOverlay is not null)
+        {
+            _settingsOverlay.Visible = false;
+        }
+    }
+
+    private void SaveSettings()
+    {
+        if (_settingsSpeedSlider is null
+            || _settingsGlobalOffset is null
+            || _settingsInputOffset is null
+            || _settingsGridDensity is null)
+        {
+            return;
+        }
+
+        try
+        {
+            int gridDensity = _settingsGridDensity.GetItemId(
+                _settingsGridDensity.Selected);
+            var settings = new PlayerSettings(
+                _settingsSpeedSlider.Value,
+                _settingsGlobalOffset.Value,
+                _settingsInputOffset.Value,
+                gridDensity);
+            _settingsStore.Save(settings);
+            _playerSettings = settings;
+            _playfield?.ApplyPlayerSettings(settings);
+            CloseSettings();
+        }
+        catch (Exception exception)
+        {
+            if (_settingsError is not null)
+            {
+                _settingsError.Text = $"保存失败  ·  {exception.Message}";
+                _settingsError.Visible = true;
+            }
+        }
+    }
+
+    private void LoadDefaultSettingsControls()
+    {
+        LoadSettingsControls(PlayerSettings.Default);
+    }
+
+    private void LoadSettingsControls(PlayerSettings settings)
+    {
+        if (_settingsSpeedSlider is not null)
+        {
+            _settingsSpeedSlider.Value = settings.ScrollSpeed;
+        }
+
+        if (_settingsGlobalOffset is not null)
+        {
+            _settingsGlobalOffset.Value = settings.GlobalTimingOffsetMilliseconds;
+        }
+
+        if (_settingsInputOffset is not null)
+        {
+            _settingsInputOffset.Value = settings.InputOffsetMilliseconds;
+        }
+
+        if (_settingsGridDensity is not null)
+        {
+            for (int index = 0; index < _settingsGridDensity.ItemCount; index++)
+            {
+                if (_settingsGridDensity.GetItemId(index) == settings.GridDensity)
+                {
+                    _settingsGridDensity.Select(index);
+                    break;
+                }
+            }
+        }
+
+        OnSettingsSpeedChanged(settings.ScrollSpeed);
+    }
+
+    private void OnSettingsSpeedChanged(double value)
+    {
+        if (_settingsSpeedValue is not null)
+        {
+            _settingsSpeedValue.Text = $"{value:F1}";
+        }
+    }
+
     public override void _Input(InputEvent @event)
     {
         if (@event is not InputEventKey keyEvent)
@@ -324,7 +705,23 @@ public partial class Main : Control
 
         if (CurrentFlowState == AppFlowState.SongSelect)
         {
-            if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Enter)
+            if (_settingsOverlay?.Visible == true)
+            {
+                if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Escape)
+                {
+                    CloseSettings();
+                    GetViewport().SetInputAsHandled();
+                }
+
+                return;
+            }
+
+            if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Escape)
+            {
+                ShowSettings();
+                GetViewport().SetInputAsHandled();
+            }
+            else if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Enter)
             {
                 StartSelectedSong();
                 GetViewport().SetInputAsHandled();
@@ -346,6 +743,39 @@ public partial class Main : Control
                 GetViewport().SetInputAsHandled();
             }
 
+            return;
+        }
+
+        if (CurrentFlowState == AppFlowState.Paused)
+        {
+            if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Escape)
+            {
+                ResumeGameplay();
+                GetViewport().SetInputAsHandled();
+            }
+            else if (keyEvent.Pressed && !keyEvent.Echo && keyEvent.Keycode == Key.Enter)
+            {
+                RetrySelectedSong();
+                GetViewport().SetInputAsHandled();
+            }
+            else if (keyEvent.Pressed
+                && !keyEvent.Echo
+                && keyEvent.Keycode == Key.Backspace)
+            {
+                ReturnToSongSelect();
+                GetViewport().SetInputAsHandled();
+            }
+
+            return;
+        }
+
+        if (CurrentFlowState == AppFlowState.Playing
+            && keyEvent.Pressed
+            && !keyEvent.Echo
+            && keyEvent.Keycode == Key.Escape)
+        {
+            PauseGameplay();
+            GetViewport().SetInputAsHandled();
             return;
         }
 

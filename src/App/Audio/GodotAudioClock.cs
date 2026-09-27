@@ -21,7 +21,7 @@ public sealed class GodotAudioClock
     {
         get
         {
-            if (!_player.Playing)
+            if (!_player.Playing || _player.StreamPaused)
             {
                 return _lastReportedTime;
             }

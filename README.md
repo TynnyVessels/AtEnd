@@ -11,9 +11,15 @@ Godot 4 C# rhythm game prototype. Confirmed gameplay rules live in
 - `tests/AtEnd.Core.Tests`: dependency-free console test runner for the core.
 - `src/App/Input`: Godot adapter that reads physical keycodes and forwards them
   to the engine-independent input state.
+- `editor`: standalone Godot C# chart editor project. It shares `AtEnd.Core`
+  data and timing rules but is not included in the game build.
 
 Run `tools/Test.ps1` to execute the core tests, `tools/Build.ps1` to build the
 Godot C# project, `tools/SmokeTest.ps1` to verify the running scene and audio
 clock, `tools/Run.ps1` to launch the game, or `tools/Open-Editor.ps1` to open the
 project in the Godot editor. All scripts use the repository-local development
 tools under `.tools`.
+
+The chart editor has its own commands under `editor/tools`; run
+`editor/tools/Run.ps1` to launch it or `editor/tools/Open-Editor.ps1` to work on
+it in Godot.

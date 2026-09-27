@@ -1,0 +1,26 @@
+; AtEnd chart editor project.
+
+config_version=5
+
+[application]
+
+config/name="AtEnd Chart Editor"
+run/main_scene="res://src/EditorMain.tscn"
+config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
+
+[display]
+
+window/size/viewport_width=1280
+window/size/viewport_height=720
+window/size/window_width_override=1280
+window/size/window_height_override=720
+window/stretch/mode="canvas_items"
+
+[dotnet]
+
+project/assembly_name="AtEnd.Editor"
+
+[rendering]
+
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"

@@ -200,16 +200,24 @@ offset_right = 302.0
 offset_bottom = 430.0
 color = Color(0.022, 0.032, 0.075, 1)
 
-[node name="SongButton" type="Button" parent="SongSelectOverlay/Panel/SongList"]
-layout_mode = 0
+[node name="Scroll" type="ScrollContainer" parent="SongSelectOverlay/Panel/SongList"]
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
 offset_left = 10.0
 offset_top = 10.0
-offset_right = 262.0
-offset_bottom = 62.0
-theme_override_colors/font_color = Color(0.94, 0.96, 1, 1)
-theme_override_font_sizes/font_size = 16
-text = "Loading..."
-alignment = 0
+offset_right = -10.0
+offset_bottom = -10.0
+grow_horizontal = 2
+grow_vertical = 2
+horizontal_scroll_mode = 0
+
+[node name="Songs" type="VBoxContainer" parent="SongSelectOverlay/Panel/SongList/Scroll"]
+custom_minimum_size = Vector2(252, 0)
+layout_mode = 2
+size_flags_horizontal = 3
+theme_override_constants/separation = 8
 
 [node name="JacketFrame" type="ColorRect" parent="SongSelectOverlay/Panel"]
 layout_mode = 0
@@ -310,7 +318,7 @@ offset_right = 302.0
 offset_bottom = 480.0
 theme_override_colors/font_color = Color(0.42, 0.48, 0.62, 1)
 theme_override_font_sizes/font_size = 12
-text = "One test chart available"
+text = "SCANNING SONGS..."
 horizontal_alignment = 0
 
 [node name="Error" type="Label" parent="SongSelectOverlay/Panel"]
@@ -472,3 +480,247 @@ offset_right = 636.0
 offset_bottom = 480.0
 theme_override_font_sizes/font_size = 17
 text = "SONG SELECT  /  ESC"
+
+[node name="SettingsButton" type="Button" parent="SongSelectOverlay"]
+layout_mode = 0
+offset_left = 20.0
+offset_top = 18.0
+offset_right = 168.0
+offset_bottom = 62.0
+theme_override_font_sizes/font_size = 14
+text = "设置  /  ESC"
+
+[node name="PauseOverlay" type="ColorRect" parent="."]
+visible = false
+z_index = 15
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.012, 0.018, 0.04, 0.88)
+
+[node name="Panel" type="ColorRect" parent="PauseOverlay"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -220.0
+offset_top = -220.0
+offset_right = 220.0
+offset_bottom = 220.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.035, 0.05, 0.11, 1)
+
+[node name="Heading" type="Label" parent="PauseOverlay/Panel"]
+layout_mode = 0
+offset_left = 32.0
+offset_top = 34.0
+offset_right = 408.0
+offset_bottom = 78.0
+theme_override_colors/font_color = Color(0.86, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 26
+text = "已暂停"
+horizontal_alignment = 1
+
+[node name="ContinueButton" type="Button" parent="PauseOverlay/Panel"]
+layout_mode = 0
+offset_left = 84.0
+offset_top = 116.0
+offset_right = 356.0
+offset_bottom = 174.0
+theme_override_font_sizes/font_size = 17
+text = "继续  /  ESC"
+
+[node name="RetryButton" type="Button" parent="PauseOverlay/Panel"]
+layout_mode = 0
+offset_left = 84.0
+offset_top = 198.0
+offset_right = 356.0
+offset_bottom = 256.0
+theme_override_font_sizes/font_size = 17
+text = "重试  /  ENTER"
+
+[node name="ExitButton" type="Button" parent="PauseOverlay/Panel"]
+layout_mode = 0
+offset_left = 84.0
+offset_top = 280.0
+offset_right = 356.0
+offset_bottom = 338.0
+theme_override_font_sizes/font_size = 17
+text = "退出到选曲  /  BACKSPACE"
+
+[node name="SettingsOverlay" type="ColorRect" parent="."]
+visible = false
+z_index = 20
+layout_mode = 1
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.012, 0.018, 0.04, 0.94)
+
+[node name="Panel" type="ColorRect" parent="SettingsOverlay"]
+layout_mode = 1
+anchors_preset = 8
+anchor_left = 0.5
+anchor_top = 0.5
+anchor_right = 0.5
+anchor_bottom = 0.5
+offset_left = -360.0
+offset_top = -285.0
+offset_right = 360.0
+offset_bottom = 285.0
+grow_horizontal = 2
+grow_vertical = 2
+color = Color(0.035, 0.05, 0.11, 1)
+
+[node name="Heading" type="Label" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 38.0
+offset_top = 26.0
+offset_right = 682.0
+offset_bottom = 64.0
+theme_override_colors/font_color = Color(0.86, 0.9, 1, 1)
+theme_override_font_sizes/font_size = 24
+text = "设置"
+horizontal_alignment = 1
+
+[node name="SpeedCaption" type="Label" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 58.0
+offset_top = 92.0
+offset_right = 280.0
+offset_bottom = 122.0
+theme_override_font_sizes/font_size = 15
+text = "流速"
+
+[node name="SpeedSlider" type="HSlider" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 288.0
+offset_top = 88.0
+offset_right = 582.0
+offset_bottom = 126.0
+min_value = 1.0
+max_value = 10.0
+step = 0.1
+value = 7.0
+
+[node name="SpeedValue" type="Label" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 594.0
+offset_top = 92.0
+offset_right = 664.0
+offset_bottom = 122.0
+theme_override_colors/font_color = Color(0.65, 0.78, 1, 1)
+theme_override_font_sizes/font_size = 15
+text = "7.0"
+horizontal_alignment = 2
+
+[node name="GlobalOffsetCaption" type="Label" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 58.0
+offset_top = 154.0
+offset_right = 310.0
+offset_bottom = 184.0
+theme_override_font_sizes/font_size = 15
+text = "全局时间偏移"
+
+[node name="GlobalOffset" type="SpinBox" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 470.0
+offset_top = 146.0
+offset_right = 664.0
+offset_bottom = 188.0
+min_value = -500.0
+max_value = 500.0
+step = 1.0
+suffix = " ms"
+
+[node name="InputOffsetCaption" type="Label" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 58.0
+offset_top = 216.0
+offset_right = 310.0
+offset_bottom = 246.0
+theme_override_font_sizes/font_size = 15
+text = "输入偏移"
+
+[node name="InputOffset" type="SpinBox" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 470.0
+offset_top = 208.0
+offset_right = 664.0
+offset_bottom = 250.0
+min_value = -500.0
+max_value = 500.0
+step = 1.0
+suffix = " ms"
+
+[node name="GridCaption" type="Label" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 58.0
+offset_top = 278.0
+offset_right = 310.0
+offset_bottom = 308.0
+theme_override_font_sizes/font_size = 15
+text = "轨道辅助线"
+
+[node name="GridDensity" type="OptionButton" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 470.0
+offset_top = 270.0
+offset_right = 664.0
+offset_bottom = 312.0
+
+[node name="OffsetHint" type="Label" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 58.0
+offset_top = 338.0
+offset_right = 664.0
+offset_bottom = 382.0
+theme_override_colors/font_color = Color(0.48, 0.56, 0.72, 1)
+theme_override_font_sizes/font_size = 12
+text = "正偏移会让内部时间戳提前；保存后从下一次游玩开始生效。"
+horizontal_alignment = 1
+
+[node name="DefaultsButton" type="Button" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 270.0
+offset_top = 424.0
+offset_right = 450.0
+offset_bottom = 474.0
+text = "恢复默认"
+
+[node name="CancelButton" type="Button" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 58.0
+offset_top = 424.0
+offset_right = 238.0
+offset_bottom = 474.0
+text = "退出  /  ESC"
+
+[node name="SaveButton" type="Button" parent="SettingsOverlay/Panel"]
+layout_mode = 0
+offset_left = 482.0
+offset_top = 424.0
+offset_right = 662.0
+offset_bottom = 474.0
+text = "保存"
+
+[node name="Error" type="Label" parent="SettingsOverlay/Panel"]
+visible = false
+layout_mode = 0
+offset_left = 58.0
+offset_top = 496.0
+offset_right = 664.0
+offset_bottom = 530.0
+theme_override_colors/font_color = Color(1, 0.32, 0.42, 1)
+theme_override_font_sizes/font_size = 12
+text = "保存失败"
+horizontal_alignment = 1

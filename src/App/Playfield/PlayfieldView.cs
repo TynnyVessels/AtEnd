@@ -12,6 +12,7 @@ public enum SongPlaybackState
 {
     Idle,
     Playing,
+    Paused,
     Completed,
 }
 
@@ -73,6 +74,7 @@ public partial class PlayfieldView : Control
 
     public ScoreSnapshot CurrentScore => _gameplaySession?.Snapshot() ?? default;
     public SongPlaybackState PlaybackState { get; private set; } = SongPlaybackState.Idle;
+    public bool IsAudioPaused => _audioPlayer?.StreamPaused == true;
 
     public string? LoadedSongId { get; private set; }
     public string? LoadedChartId { get; private set; }
@@ -215,6 +217,15 @@ public partial class PlayfieldView : Control
         StartSong(SongPackageLoader.LoadDirectory(filesystemPath), chartId);
     }
 
+    public void ApplyPlayerSettings(PlayerSettings settings)
+    {
+        PlayerScrollSpeedMultiplier = settings.VisualSpeedMultiplier;
+        GlobalTimingOffsetMilliseconds = settings.GlobalTimingOffsetMilliseconds;
+        InputOffsetMilliseconds = settings.InputOffsetMilliseconds;
+        GridDensity = settings.GridDensity;
+        QueueRedraw();
+    }
+
     public void StartSong(SongPackageDefinition package, string chartId)
     {
         ArgumentNullException.ThrowIfNull(package);
@@ -237,6 +248,7 @@ public partial class PlayfieldView : Control
             ?? throw new InvalidDataException($"Godot could not load {audioFilePath}.");
 
         _audioPlayer.Stop();
+        _audioPlayer.StreamPaused = false;
         _audioClock = null;
         _audioPlayer.Stream = null;
         _pendingPresses.Clear();
@@ -272,11 +284,38 @@ public partial class PlayfieldView : Control
             + $"tick zero at {package.Timing.TimingMap.AudioTimeAtTickZeroSeconds:F6}s.");
     }
 
+    public void PauseSong()
+    {
+        if (PlaybackState != SongPlaybackState.Playing
+            || _audioPlayer is null
+            || _audioClock is null)
+        {
+            return;
+        }
+
+        _ = _audioClock.CurrentTimeSeconds;
+        _pendingPresses.Clear();
+        _audioPlayer.StreamPaused = true;
+        SetPlaybackState(SongPlaybackState.Paused);
+    }
+
+    public void ResumeSong()
+    {
+        if (PlaybackState != SongPlaybackState.Paused || _audioPlayer is null)
+        {
+            return;
+        }
+
+        _audioPlayer.StreamPaused = false;
+        SetPlaybackState(SongPlaybackState.Playing);
+    }
+
     public void StopSong()
     {
         _audioPlayer?.Stop();
         if (_audioPlayer is not null)
         {
+            _audioPlayer.StreamPaused = false;
             _audioPlayer.Stream = null;
         }
 

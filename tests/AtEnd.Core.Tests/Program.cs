@@ -32,6 +32,7 @@ var tests = new (string Name, Action Body)[]
     ("Visual speed supports stops and reverse travel", TestVisualSpeedStopsAndReverse),
     ("Visual speed rejects invalid maps and player speed", TestVisualSpeedValidation),
     ("Gameplay timing offsets adjust audio and input independently", TestGameplayTimingOffsets),
+    ("Player settings validate supported ranges", TestPlayerSettings),
     ("Chart format accepts stop and reverse speed events", TestChartVisualSpeedParsing),
     ("Playfield acceleration remains continuous past judgment", TestPlayfieldAcceleration),
     ("Playfield note visibility preserves misses", TestPlayfieldNoteVisibility),
@@ -45,6 +46,9 @@ var tests = new (string Name, Action Body)[]
     ("Gameplay session judges hold points from held state", TestGameplaySessionHoldPoints),
     ("Gameplay session validates chart objects and time", TestGameplaySessionValidation),
     ("Song package loader reads the formal test chart", TestSongPackageLoader),
+    ("Song library isolates the empty package", TestSongLibraryEmptyPackage),
+    ("Song library rejects duplicate song and chart identifiers", TestSongLibraryDuplicates),
+    ("Song metadata rejects paths outside its package", TestSongPathValidation),
     ("Moving Rel holds interpolate point requirements", TestMovingHoldInterpolation),
     ("Chart loader rejects malformed content", TestChartLoaderValidation),
 };
@@ -577,6 +581,28 @@ static void TestGameplayTimingOffsets()
     Throws<ArgumentOutOfRangeException>(() => offsets.AdjustAudioTime(double.PositiveInfinity));
 }
 
+static void TestPlayerSettings()
+{
+    PlayerSettings defaults = PlayerSettings.Default;
+    Near(7, defaults.ScrollSpeed);
+    Near(1, defaults.VisualSpeedMultiplier);
+    Near(0, defaults.GlobalTimingOffsetMilliseconds);
+    Near(0, defaults.InputOffsetMilliseconds);
+    Equal(18, defaults.GridDensity);
+
+    var settings = new PlayerSettings(3.5, -125, 80, 9);
+    Near(3.5, settings.ScrollSpeed);
+    Near(0.5, settings.VisualSpeedMultiplier);
+    Near(-125, settings.GlobalTimingOffsetMilliseconds);
+    Near(80, settings.InputOffsetMilliseconds);
+    Equal(9, settings.GridDensity);
+
+    Throws<ArgumentOutOfRangeException>(() => new PlayerSettings(0, 0, 0, 18));
+    Throws<ArgumentOutOfRangeException>(() => new PlayerSettings(1, -501, 0, 18));
+    Throws<ArgumentOutOfRangeException>(() => new PlayerSettings(1, 0, 501, 18));
+    Throws<ArgumentOutOfRangeException>(() => new PlayerSettings(1, 0, 0, 6));
+}
+
 static void TestChartVisualSpeedParsing()
 {
     const string valid = """
@@ -888,6 +914,113 @@ static void TestSongPackageLoader()
     Equal(11, chart.CreateHoldScoringPoints().Count);
     Equal(RelRegion.Right, chart.Objects[1].GetInputRequirement().RelRegions);
     Equal(DrmColor.Green, chart.Objects[2].GetInputRequirement().DrmColor);
+}
+
+static void TestSongLibraryEmptyPackage()
+{
+    string libraryPath = Path.Combine(
+        Path.GetTempPath(),
+        $"atend-empty-song-library-{Guid.NewGuid():N}");
+    string emptyPackagePath = Path.Combine(libraryPath, "empty-song");
+    Directory.CreateDirectory(emptyPackagePath);
+    try
+    {
+        SongLibraryScanResult library = SongLibraryScanner.ScanDirectory(libraryPath);
+        Equal(0, library.Packages.Count);
+        Equal(1, library.Failures.Count);
+        Equal("empty-song", Path.GetFileName(library.Failures[0].DirectoryPath));
+    }
+    finally
+    {
+        Directory.Delete(libraryPath, recursive: true);
+    }
+}
+
+static void TestSongLibraryDuplicates()
+{
+    string libraryPath = Path.Combine(
+        Path.GetTempPath(),
+        $"atend-song-library-{Guid.NewGuid():N}");
+    Directory.CreateDirectory(libraryPath);
+    try
+    {
+        CreateTestSongPackage(libraryPath, "a", "song-a", "shared-chart");
+        CreateTestSongPackage(libraryPath, "b", "song-b", "shared-chart");
+        CreateTestSongPackage(libraryPath, "c", "shared-song", "chart-c");
+        CreateTestSongPackage(libraryPath, "d", "shared-song", "chart-d");
+        CreateTestSongPackage(libraryPath, "e", "valid-song", "valid-chart");
+
+        SongLibraryScanResult library = SongLibraryScanner.ScanDirectory(libraryPath);
+        Equal(1, library.Packages.Count);
+        Equal("valid-song", library.Packages[0].Song.SongId);
+        Equal(4, library.Failures.Count);
+        Equal(2, library.Failures.Count(failure => failure.Message.Contains("Duplicate songId")));
+        Equal(2, library.Failures.Count(failure => failure.Message.Contains("Duplicate chartId")));
+    }
+    finally
+    {
+        Directory.Delete(libraryPath, recursive: true);
+    }
+}
+
+static void TestSongPathValidation()
+{
+    const string invalid = """
+        {
+          "formatVersion": 1,
+          "songId": "unsafe",
+          "title": "Unsafe",
+          "artist": "Tester",
+          "audioFile": "../outside.ogg",
+          "jacketFile": null,
+          "preview": { "startSeconds": 0, "lengthSeconds": 10 }
+        }
+        """;
+    Throws<InvalidDataException>(() => SongPackageLoader.ParseSong(invalid));
+}
+
+static void CreateTestSongPackage(
+    string libraryPath,
+    string directoryName,
+    string songId,
+    string chartId)
+{
+    string packagePath = Path.Combine(libraryPath, directoryName);
+    string chartsPath = Path.Combine(packagePath, "charts");
+    Directory.CreateDirectory(chartsPath);
+    File.WriteAllBytes(Path.Combine(packagePath, "audio.ogg"), Array.Empty<byte>());
+    File.WriteAllText(Path.Combine(packagePath, "song.json"), $$"""
+        {
+          "formatVersion": 1,
+          "songId": "{{songId}}",
+          "title": "{{songId}}",
+          "artist": "Tester",
+          "audioFile": "audio.ogg",
+          "jacketFile": null,
+          "preview": { "startSeconds": 0, "lengthSeconds": 10 }
+        }
+        """);
+    File.WriteAllText(Path.Combine(packagePath, "timing.json"), """
+        {
+          "formatVersion": 1,
+          "audioTimeAtTickZeroSeconds": 0,
+          "initialBpm": 120,
+          "bpmChanges": [],
+          "timeSignatures": [{ "tick": 0, "numerator": 4, "denominator": 4 }]
+        }
+        """);
+    File.WriteAllText(Path.Combine(chartsPath, "test.atendchart"), $$"""
+        {
+          "formatVersion": 1,
+          "chartId": "{{chartId}}",
+          "difficulty": { "name": "Test", "level": 1 },
+          "charter": "Tester",
+          "visualSpeedEvents": [],
+          "objects": [
+            { "objectId": 1, "type": "click", "inputType": "rel", "tick": 0, "lane": 0, "width": 1 }
+          ]
+        }
+        """);
 }
 
 static void TestMovingHoldInterpolation()

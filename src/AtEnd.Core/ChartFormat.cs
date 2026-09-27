@@ -492,7 +492,11 @@ public static class SongPackageLoader
     private static void RequireFileName(string? value, string field)
     {
         RequireText(value, field);
-        if (Path.GetFileName(value) != value)
+        string fileName = value!;
+        if (Path.IsPathRooted(fileName)
+            || Path.GetFileName(fileName) != fileName
+            || fileName is "." or ".."
+            || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
         {
             throw new InvalidDataException($"{field} must be a file name without a path.");
         }
