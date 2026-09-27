@@ -30,6 +30,13 @@ translucent ribbons that follow lane and width changes, with diamond-shaped
 judge points. Playback stays outside the chart workspace so it is always
 available.
 
-Editing and saving are intentionally not enabled yet. The next milestone adds
-an in-memory editable chart document with undo/redo before any file can be
-overwritten.
+The editor now creates an in-memory editable document for the selected chart.
+The Document tab can edit chart metadata, tracks unsaved changes, and provides
+command-based undo/redo through its buttons or Ctrl+Z and Ctrl+Y. Save As writes
+only a new `.atendchart` file inside the current song package's `charts`
+directory. It refuses existing file names and chart identifiers, writes through
+a temporary file, reloads the result for validation, and never overwrites the
+source chart.
+
+The timeline is still read-only. The next milestone adds object selection and
+note placement on top of this document and history foundation.

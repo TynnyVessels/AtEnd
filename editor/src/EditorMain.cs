@@ -16,6 +16,8 @@ public partial class EditorMain : Control
     private Label? _timeLabel;
     private Label? _detailsLabel;
     private Label? _statusLabel;
+    private Timer? _statusTimer;
+    private StyleBoxFlat? _statusBackground;
     private TimelineView? _timeline;
     private TabContainer? _workspace;
     private AudioStreamPlayer? _audioPlayer;
@@ -36,6 +38,7 @@ public partial class EditorMain : Control
         _timeLabel = GetNode<Label>("RightPanel/TimeLabel");
         _detailsLabel = GetNode<Label>("RightPanel/Workspace/Chart/Details");
         _statusLabel = GetNode<Label>("RightPanel/Status");
+        InitializeStatusNotifications();
         _timeline = GetNode<TimelineView>("Preview/Timeline");
         _audioPlayer = GetNode<AudioStreamPlayer>("AudioPlayer");
 
@@ -51,6 +54,7 @@ public partial class EditorMain : Control
         _workspace.SetTabTitle(0, "谱面");
 
         ScanSongs();
+        InitializeEditingFoundation();
         GD.Print("AtEnd chart editor is ready.");
 
         if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--editor-smoke-test") >= 0)
@@ -70,7 +74,12 @@ public partial class EditorMain : Control
                 && _audioPlayer.Stream is not null
                 && reachesTop
                 && reachesBottom
-                && fillsPreviewHeight;
+                && fillsPreviewHeight
+                && _document is not null
+                && !_document.IsDirty
+                && _workspace.GetTabCount() == 2
+                && Math.Abs(_statusTimer!.WaitTime - 3.0) <= 0.001
+                && !_statusLabel.Visible;
             if (valid)
             {
                 GD.Print("Chart editor smoke test passed: package, chart, audio, and timeline loaded.");
@@ -138,10 +147,12 @@ public partial class EditorMain : Control
             SetControlsEnabled(true);
             _songSelector.Select(0);
             OnSongSelected(0);
-            SetStatus(_library.Failures.Count == 0
-                ? $"已加载 {_library.Packages.Count} 个歌曲包。"
-                : $"已加载 {_library.Packages.Count} 个歌曲包，跳过 {_library.Failures.Count} 个无效目录。",
-                isError: _library.Failures.Count > 0);
+            if (_library.Failures.Count > 0)
+            {
+                SetStatus(
+                    $"跳过 {_library.Failures.Count} 个无效歌曲包。",
+                    isError: true);
+            }
         }
         catch (Exception exception)
         {
@@ -198,7 +209,6 @@ public partial class EditorMain : Control
                 $"{_selectedPackage.Song.Title}  ·  {_selectedChart.Difficulty.Name} {_selectedChart.Difficulty.Level}"
                 + $"  ·  {_selectedChart.Objects.Count} 个物件"
                 + $"  ·  {_selectedPackage.Timing.TimingMap.InitialBeatsPerMinute:F3} BPM";
-            SetStatus("谱面已载入；当前为只读模式。", isError: false);
         }
         catch (Exception exception)
         {
@@ -330,17 +340,55 @@ public partial class EditorMain : Control
         if (_seekSlider is not null) _seekSlider.Editable = enabled;
     }
 
+    private void InitializeStatusNotifications()
+    {
+        _statusTimer = new Timer { OneShot = true, WaitTime = 3.0 };
+        _statusTimer.Timeout += () =>
+        {
+            if (_statusLabel is not null)
+            {
+                _statusLabel.Visible = false;
+            }
+        };
+        AddChild(_statusTimer);
+
+        _statusBackground = new StyleBoxFlat
+        {
+            BgColor = new Color("18213d"),
+            CornerRadiusTopLeft = 8,
+            CornerRadiusTopRight = 8,
+            CornerRadiusBottomLeft = 8,
+            CornerRadiusBottomRight = 8,
+            ContentMarginLeft = 14,
+            ContentMarginTop = 10,
+            ContentMarginRight = 14,
+            ContentMarginBottom = 10,
+        };
+        _statusLabel!.AddThemeStyleboxOverride("normal", _statusBackground);
+        _statusLabel.Visible = false;
+        _statusLabel.ZIndex = 100;
+    }
+
     private void SetStatus(string message, bool isError)
     {
+
         if (_statusLabel is null)
         {
             return;
         }
 
         _statusLabel.Text = message;
+        _statusLabel.Visible = true;
         _statusLabel.AddThemeColorOverride(
             "font_color",
-            isError ? new Color("ff6b7a") : new Color("8296c4"));
+            isError ? new Color("ffd5da") : new Color("dce5ff"));
+        if (_statusBackground is not null)
+        {
+            _statusBackground.BgColor = isError ? new Color("572936") : new Color("18213d");
+        }
+
+        _statusTimer?.Stop();
+        _statusTimer?.Start();
     }
 
     private static string FormatTime(double seconds)

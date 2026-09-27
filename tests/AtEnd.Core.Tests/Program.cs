@@ -34,6 +34,7 @@ var tests = new (string Name, Action Body)[]
     ("Gameplay timing offsets adjust audio and input independently", TestGameplayTimingOffsets),
     ("Player settings validate supported ranges", TestPlayerSettings),
     ("Chart format accepts stop and reverse speed events", TestChartVisualSpeedParsing),
+    ("Chart serialization round-trips without data loss", TestChartSerializationRoundTrip),
     ("Playfield acceleration remains continuous past judgment", TestPlayfieldAcceleration),
     ("Playfield note visibility preserves misses", TestPlayfieldNoteVisibility),
     ("Caught hold slices clip at the judgment line", TestCaughtHoldSliceClipping),
@@ -629,6 +630,54 @@ static void TestChartVisualSpeedParsing()
         "{ \"tick\": 1920, \"multiplier\": -1 },",
         "{ \"tick\": 0, \"multiplier\": -1 },");
     Throws<InvalidDataException>(() => SongPackageLoader.ParseChart(duplicate));
+}
+
+static void TestChartSerializationRoundTrip()
+{
+    const string source = """
+        {
+          "formatVersion": 1,
+          "chartId": "round-trip",
+          "difficulty": { "name": "Hard", "level": 8 },
+          "charter": "Tester",
+          "visualSpeedEvents": [
+            { "tick": 0, "multiplier": 1 },
+            { "tick": 1920, "multiplier": -0.5 }
+          ],
+          "objects": [
+            { "objectId": 1, "type": "click", "inputType": "drm", "color": "blue", "tick": 960, "lane": 4, "width": 3 },
+            {
+              "objectId": 2,
+              "type": "hold",
+              "inputType": "rel",
+              "startTick": 1920,
+              "endTick": 5760,
+              "path": [
+                { "tick": 1920, "lane": 0, "width": 6 },
+                { "tick": 3840, "lane": 6, "width": 6 },
+                { "tick": 5760, "lane": 12, "width": 6 }
+              ],
+              "judgeTicks": [2880, 3840, 4800]
+            }
+          ]
+        }
+        """;
+
+    ChartDefinition first = SongPackageLoader.ParseChart(source);
+    string serialized = ChartSerializer.Serialize(first);
+    ChartDefinition second = SongPackageLoader.ParseChart(serialized);
+
+    Equal(first.FormatVersion, second.FormatVersion);
+    Equal(first.ChartId, second.ChartId);
+    Equal(first.Difficulty, second.Difficulty);
+    Equal(first.Charter, second.Charter);
+    Equal(first.VisualSpeedEvents.Count, second.VisualSpeedEvents.Count);
+    Equal(first.Objects.Count, second.Objects.Count);
+    Equal(first.Objects[0].Color, second.Objects[0].Color);
+    Equal(first.Objects[0].StartPoint, second.Objects[0].StartPoint);
+    Equal(first.Objects[1].Path[1], second.Objects[1].Path[1]);
+    Equal(first.Objects[1].JudgeTicks[2], second.Objects[1].JudgeTicks[2]);
+    Equal(serialized, ChartSerializer.Serialize(second));
 }
 
 static void TestPlayfieldAcceleration()

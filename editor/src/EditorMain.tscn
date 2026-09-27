@@ -95,25 +95,13 @@ theme_override_colors/font_color = Color(0.86, 0.9, 1, 1)
 theme_override_font_sizes/font_size = 22
 text = "AtEnd 制谱器"
 
-[node name="Mode" type="Label" parent="RightPanel"]
-layout_mode = 1
-anchors_preset = 10
-anchor_right = 1.0
-offset_left = 22.0
-offset_top = 52.0
-offset_right = -22.0
-offset_bottom = 74.0
-grow_horizontal = 2
-theme_override_colors/font_color = Color(0.48, 0.58, 0.8, 1)
-theme_override_font_sizes/font_size = 12
-text = "只读预览"
 
 [node name="PlayPauseButton" type="Button" parent="RightPanel"]
 layout_mode = 0
 offset_left = 22.0
-offset_top = 84.0
+offset_top = 62.0
 offset_right = 128.0
-offset_bottom = 126.0
+offset_bottom = 104.0
 text = "播放"
 
 [node name="TimeLabel" type="Label" parent="RightPanel"]
@@ -121,9 +109,9 @@ layout_mode = 1
 anchors_preset = 10
 anchor_right = 1.0
 offset_left = 142.0
-offset_top = 93.0
+offset_top = 71.0
 offset_right = -22.0
-offset_bottom = 119.0
+offset_bottom = 97.0
 grow_horizontal = 2
 theme_override_colors/font_color = Color(0.65, 0.76, 1, 1)
 theme_override_font_sizes/font_size = 12
@@ -136,9 +124,9 @@ anchors_preset = 15
 anchor_right = 1.0
 anchor_bottom = 1.0
 offset_left = 14.0
-offset_top = 144.0
+offset_top = 120.0
 offset_right = -14.0
-offset_bottom = -84.0
+offset_bottom = -14.0
 grow_horizontal = 2
 grow_vertical = 2
 current_tab = 0
@@ -231,20 +219,25 @@ text = "等待载入谱面"
 autowrap_mode = 2
 
 [node name="Status" type="Label" parent="RightPanel"]
+visible = false
 layout_mode = 1
-anchors_preset = 12
+anchors_preset = 3
+anchor_left = 1.0
 anchor_top = 1.0
 anchor_right = 1.0
 anchor_bottom = 1.0
-offset_left = 22.0
-offset_top = -66.0
-offset_right = -22.0
-offset_bottom = -16.0
-grow_horizontal = 2
+offset_left = -340.0
+offset_top = -82.0
+offset_right = -18.0
+offset_bottom = -18.0
+grow_horizontal = 0
 grow_vertical = 0
 theme_override_colors/font_color = Color(0.51, 0.59, 0.77, 1)
 theme_override_font_sizes/font_size = 12
-text = "正在扫描歌曲包……"
+text = ""
 autowrap_mode = 2
+horizontal_alignment = 1
+vertical_alignment = 1
+mouse_filter = 2
 
 [node name="AudioPlayer" type="AudioStreamPlayer" parent="."]
