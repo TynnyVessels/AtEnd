@@ -25,4 +25,4 @@ if ($LASTEXITCODE -ne 0) {
     throw "AtEnd chart editor build failed with exit code $LASTEXITCODE."
 }
 
-Start-Process -FilePath $godotExe -ArgumentList '--path', $editorRoot -WorkingDirectory $editorRoot
+Start-Process -FilePath $godotExe -ArgumentList '--path', $editorRoot -WorkingDirectory $editorRoot -WindowStyle Normal

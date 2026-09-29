@@ -34,6 +34,69 @@ public sealed record EditChartMetadataCommand(
     }
 }
 
+public sealed record AddChartObjectCommand(ChartObjectDefinition Object) : IChartEditCommand
+{
+    public string Description => "新增物件";
+
+    public ChartDefinition Apply(ChartDefinition chart)
+    {
+        if (chart.Objects.Any(item => item.ObjectId == Object.ObjectId))
+        {
+            throw new InvalidDataException($"物件 ID {Object.ObjectId} 已存在。");
+        }
+
+        return SongPackageLoader.ParseChart(ChartSerializer.Serialize(chart with
+        {
+            Objects = Array.AsReadOnly(chart.Objects.Append(Object).ToArray()),
+        }));
+    }
+}
+
+public sealed record ReplaceChartObjectCommand(ChartObjectDefinition Object) : IChartEditCommand
+{
+    public string Description => "修改物件";
+
+    public ChartDefinition Apply(ChartDefinition chart)
+    {
+        if (!chart.Objects.Any(item => item.ObjectId == Object.ObjectId))
+        {
+            throw new InvalidDataException($"找不到物件 ID {Object.ObjectId}。");
+        }
+
+        return SongPackageLoader.ParseChart(ChartSerializer.Serialize(chart with
+        {
+            Objects = Array.AsReadOnly(chart.Objects
+                .Select(item => item.ObjectId == Object.ObjectId ? Object : item)
+                .ToArray()),
+        }));
+    }
+}
+
+public sealed record RemoveChartObjectCommand(long ObjectId) : IChartEditCommand
+{
+    public string Description => "删除物件";
+
+    public ChartDefinition Apply(ChartDefinition chart)
+    {
+        if (!chart.Objects.Any(item => item.ObjectId == ObjectId))
+        {
+            throw new InvalidDataException($"找不到物件 ID {ObjectId}。");
+        }
+
+        if (chart.Objects.Count == 1)
+        {
+            throw new InvalidDataException("当前格式不允许删除最后一个物件。");
+        }
+
+        return SongPackageLoader.ParseChart(ChartSerializer.Serialize(chart with
+        {
+            Objects = Array.AsReadOnly(chart.Objects
+                .Where(item => item.ObjectId != ObjectId)
+                .ToArray()),
+        }));
+    }
+}
+
 public sealed class EditableChartDocument
 {
     private sealed record HistoryEntry(
@@ -44,6 +107,7 @@ public sealed class EditableChartDocument
     private readonly List<HistoryEntry> _history = new();
     private int _historyPosition;
     private string _savedSnapshot;
+    private long _nextObjectId;
 
     public EditableChartDocument(ChartDefinition sourceChart, string? sourcePath = null)
     {
@@ -51,6 +115,8 @@ public sealed class EditableChartDocument
         CurrentChart = Clone(sourceChart);
         SourcePath = sourcePath;
         _savedSnapshot = ChartSerializer.Serialize(CurrentChart);
+        long highestId = CurrentChart.Objects.Max(item => item.ObjectId);
+        _nextObjectId = highestId == long.MaxValue ? 0 : highestId + 1;
     }
 
     public ChartDefinition CurrentChart { get; private set; }
@@ -71,6 +137,18 @@ public sealed class EditableChartDocument
     public string? UndoDescription => CanUndo ? _history[_historyPosition - 1].Description : null;
 
     public string? RedoDescription => CanRedo ? _history[_historyPosition].Description : null;
+
+    public long AllocateObjectId()
+    {
+        if (_nextObjectId == 0)
+        {
+            throw new InvalidDataException("物件 ID 已用尽。");
+        }
+
+        long allocated = _nextObjectId;
+        _nextObjectId = allocated == long.MaxValue ? 0 : allocated + 1;
+        return allocated;
+    }
 
     public void Execute(IChartEditCommand command)
     {

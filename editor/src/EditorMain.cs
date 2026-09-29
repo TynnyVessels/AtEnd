@@ -12,6 +12,7 @@ public partial class EditorMain : Control
     private OptionButton? _chartSelector;
     private Button? _rescanButton;
     private Button? _playPauseButton;
+    private PlaybackGlyph? _playbackGlyph;
     private VerticalSeekBar? _seekSlider;
     private Label? _timeLabel;
     private Label? _detailsLabel;
@@ -26,6 +27,7 @@ public partial class EditorMain : Control
     private ChartDefinition? _selectedChart;
     private bool _updatingSeek;
     private bool _draggingSeek;
+    private int _tabThemeFramesRemaining;
 
     public override void _Ready()
     {
@@ -33,9 +35,16 @@ public partial class EditorMain : Control
         _songSelector = GetNode<OptionButton>("RightPanel/Workspace/Chart/SongSelector");
         _chartSelector = GetNode<OptionButton>("RightPanel/Workspace/Chart/ChartSelector");
         _rescanButton = GetNode<Button>("RightPanel/Workspace/Chart/RescanButton");
-        _playPauseButton = GetNode<Button>("RightPanel/PlayPauseButton");
+        _playPauseButton = GetNode<Button>("TopBar/PlayPauseButton");
+        _playbackGlyph = new PlaybackGlyph
+        {
+            MouseFilter = MouseFilterEnum.Ignore,
+            AnchorRight = 1,
+            AnchorBottom = 1,
+        };
+        _playPauseButton.AddChild(_playbackGlyph);
         _seekSlider = GetNode<VerticalSeekBar>("Preview/SeekSlider");
-        _timeLabel = GetNode<Label>("RightPanel/TimeLabel");
+        _timeLabel = GetNode<Label>("TopBar/TimeLabel");
         _detailsLabel = GetNode<Label>("RightPanel/Workspace/Chart/Details");
         _statusLabel = GetNode<Label>("RightPanel/Status");
         InitializeStatusNotifications();
@@ -55,6 +64,16 @@ public partial class EditorMain : Control
 
         ScanSongs();
         InitializeEditingFoundation();
+        InitializeObjectEditing();
+        ApplyCompactTheme();
+        _workspace!.AddThemeConstantOverride("side_margin", 0);
+        _workspace.AddThemeFontSizeOverride("font_size", 10);
+        _workspace.AddThemeStyleboxOverride("tab_selected", MakeBox("303034", "555558", 4, 2));
+        _workspace.AddThemeStyleboxOverride("tab_unselected", MakeBox("202023", "38383b", 4, 2));
+        _workspace.AddThemeStyleboxOverride("tab_hovered", MakeBox("38383c", "66666a", 4, 2));
+        _workspace.AddThemeStyleboxOverride("tab_disabled", MakeBox("202023", "38383b", 4, 2));
+        _workspace.AddThemeStyleboxOverride("panel", MakeBox("242427", "3b3b3e", 0, 0));
+        _tabThemeFramesRemaining = 4;
         GD.Print("AtEnd chart editor is ready.");
 
         if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--editor-smoke-test") >= 0)
@@ -77,7 +96,7 @@ public partial class EditorMain : Control
                 && fillsPreviewHeight
                 && _document is not null
                 && !_document.IsDirty
-                && _workspace.GetTabCount() == 2
+                && _workspace.GetTabCount() == 3
                 && Math.Abs(_statusTimer!.WaitTime - 3.0) <= 0.001
                 && !_statusLabel.Visible;
             if (valid)
@@ -96,6 +115,11 @@ public partial class EditorMain : Control
     public override void _Process(double delta)
     {
         _ = delta;
+        if (_tabThemeFramesRemaining > 0 && --_tabThemeFramesRemaining == 0)
+        {
+            ApplyCompactTabTheme();
+        }
+
         if (_audioPlayer is null || _seekSlider is null || _timeline is null)
         {
             return;
@@ -194,6 +218,7 @@ public partial class EditorMain : Control
         StopPlayback();
         try
         {
+            _timeline.SetSelectedObject(null);
             _selectedChart = _selectedPackage.Charts[(int)index];
             string audioPath = Path.Combine(
                 _selectedPackage.DirectoryPath,
@@ -206,9 +231,8 @@ public partial class EditorMain : Control
             _timeline.SetChart(_selectedPackage.Timing, _selectedChart, duration);
             SetDisplayedPosition(0);
             _detailsLabel!.Text =
-                $"{_selectedPackage.Song.Title}  ·  {_selectedChart.Difficulty.Name} {_selectedChart.Difficulty.Level}"
-                + $"  ·  {_selectedChart.Objects.Count} 个物件"
-                + $"  ·  {_selectedPackage.Timing.TimingMap.InitialBeatsPerMinute:F3} BPM";
+                $"物件  {_selectedChart.Objects.Count}"
+                + $"    BPM  {_selectedPackage.Timing.TimingMap.InitialBeatsPerMinute:F3}";
         }
         catch (Exception exception)
         {
@@ -257,7 +281,7 @@ public partial class EditorMain : Control
             _audioPlayer.Play((float)_seekSlider.Value);
         }
 
-        _playPauseButton.Text = _audioPlayer.StreamPaused ? "播放" : "暂停";
+        UpdatePlaybackButton();
     }
 
     private void StopPlayback()
@@ -271,7 +295,8 @@ public partial class EditorMain : Control
 
         if (_playPauseButton is not null)
         {
-            _playPauseButton.Text = "播放";
+            _playbackGlyph!.Playing = false;
+            _playPauseButton.TooltipText = "播放（空格）";
         }
     }
 
@@ -323,7 +348,8 @@ public partial class EditorMain : Control
     {
         if (_playPauseButton is not null)
         {
-            _playPauseButton.Text = "播放";
+            _playbackGlyph!.Playing = false;
+            _playPauseButton.TooltipText = "播放（空格）";
         }
 
         if (_seekSlider is not null)
@@ -354,7 +380,7 @@ public partial class EditorMain : Control
 
         _statusBackground = new StyleBoxFlat
         {
-            BgColor = new Color("18213d"),
+            BgColor = new Color("303034"),
             CornerRadiusTopLeft = 8,
             CornerRadiusTopRight = 8,
             CornerRadiusBottomLeft = 8,
@@ -381,10 +407,10 @@ public partial class EditorMain : Control
         _statusLabel.Visible = true;
         _statusLabel.AddThemeColorOverride(
             "font_color",
-            isError ? new Color("ffd5da") : new Color("dce5ff"));
+            isError ? new Color("ffd5da") : new Color("ededee"));
         if (_statusBackground is not null)
         {
-            _statusBackground.BgColor = isError ? new Color("572936") : new Color("18213d");
+            _statusBackground.BgColor = isError ? new Color("572936") : new Color("303034");
         }
 
         _statusTimer?.Stop();
@@ -395,5 +421,116 @@ public partial class EditorMain : Control
     {
         TimeSpan time = TimeSpan.FromSeconds(Math.Max(0, seconds));
         return $"{(int)time.TotalMinutes:00}:{time.Seconds:00}.{time.Milliseconds:000}";
+    }
+
+    private void UpdatePlaybackButton()
+    {
+        if (_playPauseButton is null || _audioPlayer is null)
+        {
+            return;
+        }
+
+        bool playing = _audioPlayer.Playing && !_audioPlayer.StreamPaused;
+        _playbackGlyph!.Playing = playing;
+        _playPauseButton.TooltipText = playing ? "暂停（空格）" : "播放（空格）";
+    }
+
+    private void ApplyCompactTheme()
+    {
+        Theme = new Theme();
+        Theme.SetFontSize("font_size", "TooltipLabel", 10);
+        Theme.SetColor("font_color", "TooltipLabel", new Color("e7e7e8"));
+        Theme.SetStylebox("panel", "TooltipPanel", MakeBox("252528", "56565a", 6, 3));
+        foreach (Node child in _workspace!.GetChildren())
+        {
+            ApplyCompactThemeRecursively(child);
+        }
+
+        StyleButton(_playPauseButton!);
+    }
+
+    private void ApplyCompactTabTheme()
+    {
+        var tabs = _workspace!.GetTabBar();
+        tabs.AddThemeFontSizeOverride("font_size", 10);
+        tabs.AddThemeConstantOverride("h_separation", 0);
+        tabs.AddThemeColorOverride("font_selected_color", new Color("eeeeef"));
+        tabs.AddThemeColorOverride("font_unselected_color", new Color("a5a5a8"));
+        tabs.AddThemeStyleboxOverride("tab_selected", MakeBox("303034", "555558", 4, 2));
+        tabs.AddThemeStyleboxOverride("tab_unselected", MakeBox("202023", "38383b", 4, 2));
+        tabs.AddThemeStyleboxOverride("tab_hovered", MakeBox("38383c", "66666a", 4, 2));
+    }
+
+    private static void ApplyCompactThemeRecursively(Node node)
+    {
+        if (node is OptionButton option)
+        {
+            StyleButton(option);
+            PopupMenu popup = option.GetPopup();
+            popup.AddThemeFontSizeOverride("font_size", 10);
+            popup.AddThemeColorOverride("font_color", new Color("e7e7e8"));
+            popup.AddThemeColorOverride("font_hover_color", new Color("ffffff"));
+            popup.AddThemeStyleboxOverride("panel", MakeBox("29292c", "555559", 4, 2));
+            popup.AddThemeStyleboxOverride("hover", MakeBox("454549", "454549", 4, 1));
+        }
+        else if (node is Button button)
+        {
+            StyleButton(button);
+        }
+        else if (node is LineEdit edit)
+        {
+            edit.CustomMinimumSize = new Vector2(0, 24);
+            edit.AddThemeFontSizeOverride("font_size", 11);
+            edit.AddThemeColorOverride("font_color", new Color("e8e8e9"));
+            edit.AddThemeStyleboxOverride("normal", MakeBox("1b1b1e", "48484c", 6, 2));
+            edit.AddThemeStyleboxOverride("focus", MakeBox("252528", "8b8b90", 6, 2));
+        }
+        else if (node is SpinBox spin)
+        {
+            spin.CustomMinimumSize = new Vector2(0, 24);
+            spin.GetLineEdit().AddThemeFontSizeOverride("font_size", 11);
+            spin.GetLineEdit().AddThemeColorOverride("font_color", new Color("e8e8e9"));
+            spin.GetLineEdit().AddThemeStyleboxOverride("normal", MakeBox("1b1b1e", "48484c", 6, 2));
+        }
+        else if (node is Label label && !label.HasThemeFontSizeOverride("font_size"))
+        {
+            label.AddThemeFontSizeOverride("font_size", 10);
+        }
+
+        foreach (Node child in node.GetChildren())
+        {
+            ApplyCompactThemeRecursively(child);
+        }
+    }
+
+    private static void StyleButton(Button button)
+    {
+        button.CustomMinimumSize = new Vector2(0, 24);
+        button.AddThemeFontSizeOverride("font_size", 10);
+        button.AddThemeColorOverride("font_color", new Color("e7e7e8"));
+        button.AddThemeColorOverride("font_hover_color", new Color("ffffff"));
+        button.AddThemeColorOverride("font_disabled_color", new Color("77777b"));
+        button.AddThemeStyleboxOverride("normal", MakeBox("333337", "555559", 6, 2));
+        button.AddThemeStyleboxOverride("hover", MakeBox("434347", "77777c", 6, 2));
+        button.AddThemeStyleboxOverride("pressed", MakeBox("55555a", "99999e", 6, 2));
+        button.AddThemeStyleboxOverride("disabled", MakeBox("28282b", "3d3d40", 6, 2));
+        button.AddThemeStyleboxOverride("focus", MakeBox("343438", "aaaaae", 6, 2));
+    }
+
+    private static StyleBoxFlat MakeBox(string background, string border, int horizontal, int vertical)
+    {
+        return new StyleBoxFlat
+        {
+            BgColor = new Color(background),
+            BorderColor = new Color(border),
+            BorderWidthLeft = 1,
+            BorderWidthTop = 1,
+            BorderWidthRight = 1,
+            BorderWidthBottom = 1,
+            ContentMarginLeft = horizontal,
+            ContentMarginRight = horizontal,
+            ContentMarginTop = vertical,
+            ContentMarginBottom = vertical,
+        };
     }
 }

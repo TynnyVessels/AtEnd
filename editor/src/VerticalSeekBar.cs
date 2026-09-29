@@ -82,16 +82,16 @@ public partial class VerticalSeekBar : Control
         DrawLine(
             new Vector2(centerX, 0),
             new Vector2(centerX, height),
-            new Color("30384d"),
+            new Color("3a3a3e"),
             6);
         DrawLine(
             new Vector2(centerX, handleCenter),
             new Vector2(centerX, height),
-            new Color("77829c"),
+            new Color("8d8d91"),
             6);
         DrawRect(
             new Rect2(2, handleTop, Math.Max(1, Size.X - 4), HandleHeight),
-            new Color("e7ebf5"));
+            new Color("dfdfe1"));
     }
 
     private void BeginDrag()
