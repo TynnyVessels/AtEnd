@@ -74,7 +74,7 @@ public partial class EditorMain : Control
         _workspace.AddThemeStyleboxOverride("tab_disabled", MakeBox("202023", "38383b", 4, 2));
         _workspace.AddThemeStyleboxOverride("panel", MakeBox("242427", "3b3b3e", 0, 0));
         _tabThemeFramesRemaining = 4;
-        GD.Print("AtEnd chart editor is ready.");
+        GD.Print("AtEnd 制谱器已就绪。");
 
         if (Array.IndexOf(OS.GetCmdlineUserArgs(), "--editor-smoke-test") >= 0)
         {
@@ -101,11 +101,11 @@ public partial class EditorMain : Control
                 && !_statusLabel.Visible;
             if (valid)
             {
-                GD.Print("Chart editor smoke test passed: package, chart, audio, and timeline loaded.");
+                GD.Print("制谱器快速检查通过：歌曲包、谱面、音频和时间轴均已加载。");
             }
             else
             {
-                GD.PushError("Chart editor smoke test failed.");
+                GD.PushError("制谱器快速检查失败。");
             }
 
             GetTree().Quit(valid ? 0 : 1);
@@ -182,7 +182,7 @@ public partial class EditorMain : Control
         {
             _library = null;
             SetControlsEnabled(false);
-            SetStatus($"加载失败：{exception.Message}", isError: true);
+            SetStatus($"歌曲包加载失败：{LocalizeError(exception)}", isError: true);
         }
     }
 
@@ -239,7 +239,7 @@ public partial class EditorMain : Control
             _selectedChart = null;
             _audioPlayer.Stream = null;
             _timeline.ClearChart();
-            SetStatus($"谱面加载失败：{exception.Message}", isError: true);
+            SetStatus($"谱面加载失败：{LocalizeError(exception)}", isError: true);
         }
     }
 
@@ -308,6 +308,7 @@ public partial class EditorMain : Control
         }
 
         double position = Math.Clamp(seconds, _seekSlider.MinValue, _seekSlider.MaxValue);
+        position = _timeline.SnapSelectionSeconds(position);
         if (_audioPlayer?.Playing == true)
         {
             _audioPlayer.Seek((float)position);
@@ -422,6 +423,16 @@ public partial class EditorMain : Control
         TimeSpan time = TimeSpan.FromSeconds(Math.Max(0, seconds));
         return $"{(int)time.TotalMinutes:00}:{time.Seconds:00}.{time.Milliseconds:000}";
     }
+
+    private static string LocalizeError(Exception exception) => exception switch
+    {
+        DirectoryNotFoundException => "找不到指定目录，请检查歌曲包路径。",
+        UnauthorizedAccessException => "无法访问文件，请检查路径和读写权限。",
+        InvalidDataException => "文件内容或谱面数据格式无效，请检查相关文件。",
+        IOException => "文件读写失败，请检查文件是否存在或被占用。",
+        ArgumentException => "输入内容无效，请检查谱面参数。",
+        _ => "操作失败，请检查歌曲包、谱面内容或文件权限。",
+    };
 
     private void UpdatePlaybackButton()
     {

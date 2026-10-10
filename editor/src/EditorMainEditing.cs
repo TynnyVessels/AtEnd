@@ -33,7 +33,7 @@ public partial class EditorMain
         if (@event is InputEventKey { Pressed: true } arrowKey
             && arrowKey.Keycode is Key.Left or Key.Right or Key.Up or Key.Down)
         {
-            MoveSelectedClickWithArrow(arrowKey.Keycode);
+            MoveSelectedObjectWithArrow(arrowKey.Keycode);
             GetViewport().SetInputAsHandled();
             return;
         }
@@ -60,7 +60,7 @@ public partial class EditorMain
 
         if (key.Keycode == Key.Delete && !key.CtrlPressed
             && GetViewport().GuiGetFocusOwner() is not LineEdit
-            && GetSelectedObject()?.Type == ChartObjectType.Click)
+            && GetSelectedObject() is not null)
         {
             DeleteSelectedClick();
             GetViewport().SetInputAsHandled();
@@ -89,10 +89,16 @@ public partial class EditorMain
         }
     }
 
-    private void MoveSelectedClickWithArrow(Key key)
+    private void MoveSelectedObjectWithArrow(Key key)
     {
-        if (_timeline is null || GetSelectedObject() is not { Type: ChartObjectType.Click } item)
+        if (_timeline is null)
         {
+            return;
+        }
+
+        if (GetSelectedObject() is not ChartObjectDefinition item)
+        {
+            _timeline.MovePlayheadWithArrow(key);
             return;
         }
 
@@ -117,10 +123,17 @@ public partial class EditorMain
                 return;
         }
 
-        lane = Math.Clamp(lane, 0, 18 - item.StartPoint.Width);
-        if (tick != item.StartTick || lane != item.StartPoint.Lane)
+        if (item.Type == ChartObjectType.Click)
         {
-            MoveClick(item.ObjectId, tick, lane);
+            lane = Math.Clamp(lane, 0, 18 - item.StartPoint.Width);
+            if (tick != item.StartTick || lane != item.StartPoint.Lane)
+            {
+                MoveClick(item.ObjectId, tick, lane);
+            }
+        }
+        else
+        {
+            MoveSelectedHold(tick - item.StartTick, lane - item.StartPoint.Lane);
         }
     }
 
@@ -265,7 +278,7 @@ public partial class EditorMain
         }
         catch (Exception exception) when (exception is InvalidDataException or ArgumentException)
         {
-            SetStatus($"无法应用：{exception.Message}", isError: true);
+            SetStatus($"无法应用谱面信息：{LocalizeError(exception)}", isError: true);
         }
     }
 
@@ -274,7 +287,6 @@ public partial class EditorMain
         if (_document?.Undo() == true)
         {
             UseDocumentChart();
-            SetStatus("已撤销上一步修改。", isError: false);
         }
     }
 
@@ -305,7 +317,7 @@ public partial class EditorMain
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidDataException)
         {
-            SetStatus($"另存失败：{exception.Message}", isError: true);
+            SetStatus($"另存失败：{LocalizeError(exception)}", isError: true);
         }
     }
 
