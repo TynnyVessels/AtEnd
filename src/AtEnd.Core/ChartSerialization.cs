@@ -87,7 +87,7 @@ public static class ChartSerializer
         };
 
         string json = root.ToJsonString(WriteOptions) + Environment.NewLine;
-        _ = SongPackageLoader.ParseChart(json);
+        _ = SongPackageLoader.ParseChart(json, allowEmptyObjects: true);
         return json;
     }
 }

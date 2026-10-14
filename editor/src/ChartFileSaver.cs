@@ -15,6 +15,10 @@ public static class ChartFileSaver
         ArgumentNullException.ThrowIfNull(document);
         ArgumentException.ThrowIfNullOrWhiteSpace(songPackageDirectory);
         ArgumentException.ThrowIfNullOrWhiteSpace(requestedFileName);
+        if (document.CurrentChart.Objects.Count == 0)
+        {
+            throw new InvalidDataException("谱面至少需要一个物件才能保存。");
+        }
 
         string fileName = requestedFileName.Trim();
         if (!fileName.EndsWith(".atendchart", StringComparison.OrdinalIgnoreCase))

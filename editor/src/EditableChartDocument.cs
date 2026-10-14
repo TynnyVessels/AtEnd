@@ -52,6 +52,28 @@ public sealed record AddChartObjectCommand(ChartObjectDefinition Object) : IChar
     }
 }
 
+public sealed record AddChartObjectsCommand(IReadOnlyList<ChartObjectDefinition> Objects) : IChartEditCommand
+{
+    public string Description => "粘贴物件";
+
+    public ChartDefinition Apply(ChartDefinition chart)
+    {
+        ArgumentNullException.ThrowIfNull(Objects);
+        long[] objectIds = Objects.Select(item => item.ObjectId).ToArray();
+        if (objectIds.Length == 0
+            || objectIds.Distinct().Count() != objectIds.Length
+            || objectIds.Any(id => chart.Objects.Any(item => item.ObjectId == id)))
+        {
+            throw new InvalidDataException("粘贴物件 ID 无效或已存在。");
+        }
+
+        return SongPackageLoader.ParseChart(ChartSerializer.Serialize(chart with
+        {
+            Objects = Array.AsReadOnly(chart.Objects.Concat(Objects).ToArray()),
+        }));
+    }
+}
+
 public sealed record ReplaceChartObjectCommand(ChartObjectDefinition Object) : IChartEditCommand
 {
     public string Description => "修改物件";
@@ -72,6 +94,61 @@ public sealed record ReplaceChartObjectCommand(ChartObjectDefinition Object) : I
     }
 }
 
+public sealed record ReplaceChartObjectsCommand(
+    IReadOnlyList<ChartObjectDefinition> Objects) : IChartEditCommand
+{
+    public string Description => "变换选中物件";
+
+    public ChartDefinition Apply(ChartDefinition chart)
+    {
+        ArgumentNullException.ThrowIfNull(Objects);
+        long[] objectIds = Objects.Select(item => item.ObjectId).ToArray();
+        if (objectIds.Distinct().Count() != objectIds.Length
+            || objectIds.Any(id => !chart.Objects.Any(item => item.ObjectId == id)))
+        {
+            throw new InvalidDataException("所选物件已发生变化，无法批量移动。");
+        }
+
+        var replacements = Objects.ToDictionary(item => item.ObjectId);
+        return SongPackageLoader.ParseChart(ChartSerializer.Serialize(chart with
+        {
+            Objects = Array.AsReadOnly(chart.Objects
+                .Select(item => replacements.TryGetValue(item.ObjectId, out ChartObjectDefinition? replacement)
+                    ? replacement
+                    : item)
+                .ToArray()),
+        }));
+    }
+}
+
+public sealed record RemoveChartObjectsCommand(IReadOnlyCollection<long> ObjectIds) : IChartEditCommand
+{
+    public string Description => "删除选中物件";
+
+    public ChartDefinition Apply(ChartDefinition chart)
+    {
+        ArgumentNullException.ThrowIfNull(ObjectIds);
+        long[] objectIds = ObjectIds.ToArray();
+        HashSet<long> ids = objectIds.ToHashSet();
+        if (objectIds.Length == 0
+            || ids.Count != objectIds.Length
+            || ids.Any(id => !chart.Objects.Any(item => item.ObjectId == id)))
+        {
+            throw new InvalidDataException("所选物件已发生变化，无法删除。");
+        }
+
+        ChartDefinition updated = chart with
+        {
+            Objects = Array.AsReadOnly(chart.Objects
+                .Where(item => !ids.Contains(item.ObjectId))
+                .ToArray()),
+        };
+        return updated.Objects.Count == 0
+            ? updated
+            : SongPackageLoader.ParseChart(ChartSerializer.Serialize(updated));
+    }
+}
+
 public sealed record RemoveChartObjectCommand(long ObjectId) : IChartEditCommand
 {
     public string Description => "删除物件";
@@ -83,17 +160,15 @@ public sealed record RemoveChartObjectCommand(long ObjectId) : IChartEditCommand
             throw new InvalidDataException($"找不到物件 ID {ObjectId}。");
         }
 
-        if (chart.Objects.Count == 1)
-        {
-            throw new InvalidDataException("当前格式不允许删除最后一个物件。");
-        }
-
-        return SongPackageLoader.ParseChart(ChartSerializer.Serialize(chart with
+        ChartDefinition updated = chart with
         {
             Objects = Array.AsReadOnly(chart.Objects
                 .Where(item => item.ObjectId != ObjectId)
                 .ToArray()),
-        }));
+        };
+        return updated.Objects.Count == 0
+            ? updated
+            : SongPackageLoader.ParseChart(ChartSerializer.Serialize(updated));
     }
 }
 
@@ -115,7 +190,9 @@ public sealed class EditableChartDocument
         CurrentChart = Clone(sourceChart);
         SourcePath = sourcePath;
         _savedSnapshot = ChartSerializer.Serialize(CurrentChart);
-        long highestId = CurrentChart.Objects.Max(item => item.ObjectId);
+        long highestId = CurrentChart.Objects.Count == 0
+            ? 0
+            : CurrentChart.Objects.Max(item => item.ObjectId);
         _nextObjectId = highestId == long.MaxValue ? 0 : highestId + 1;
     }
 

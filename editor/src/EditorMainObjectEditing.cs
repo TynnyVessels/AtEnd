@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AtEnd.Core;
@@ -41,6 +42,7 @@ public partial class EditorMain
         _timeline.PlaceClickRequested += PlaceClick;
         _timeline.MoveClickRequested += MoveClick;
         _timeline.ResizeClickRequested += ResizeClick;
+        _timeline.ObjectsMovedRequested += MoveMultipleObjects;
         _timeline.PlaceHoldRequested += PlaceHold;
         _timeline.HoldEditedRequested += ApplyHoldEdit;
         _timeline.AddHoldJudgeRequested += AddHoldJudgeTick;
@@ -246,7 +248,9 @@ public partial class EditorMain
         ChartObjectDefinition? item = GetSelectedObject();
         bool click = item?.Type == ChartObjectType.Click;
         bool hold = item?.Type == ChartObjectType.Hold;
-        _objectSummary.Text = item is null ? "未选中物件"
+        int selectedCount = _timeline?.SelectedObjectIds.Count ?? 0;
+        _objectSummary.Text = selectedCount > 1 ? $"已选择 {selectedCount} 个物件"
+            : item is null ? "未选中物件"
             : item.Type == ChartObjectType.Click
                 ? $"Click  ·  ID {item.ObjectId}"
                 : $"Hold  ·  ID {item.ObjectId}  ·  {item.StartTick}–{item.EndTick}";
@@ -368,14 +372,14 @@ public partial class EditorMain
         _colorSelector.Disabled = _inputTypeSelector.Selected != (int)InputCategory.Drm;
     }
 
-    private void PlaceClick(long tick, int lane)
+    private void PlaceClick(long tick, int lane, int width)
     {
         if (_document is null || _widthEdit is null)
         {
             return;
         }
 
-        int width = Math.Clamp((int)_widthEdit.Value, 1, 18 - lane);
+        width = Math.Clamp(width, 1, 18 - lane);
         InputCategory input = (InputCategory)_inputTypeSelector!.Selected;
         DrmColor? color = input == InputCategory.Drm
             ? (DrmColor)_colorSelector!.Selected : null;
@@ -533,10 +537,10 @@ public partial class EditorMain
 
     private void DeleteSelectedClick()
     {
-        ChartObjectDefinition? item = GetSelectedObject();
-        if (item is not null)
+        long[] selectedObjectIds = _timeline?.SelectedObjectIds.ToArray() ?? Array.Empty<long>();
+        if (selectedObjectIds.Length > 0)
         {
-            ExecuteObjectCommand(new RemoveChartObjectCommand(item.ObjectId));
+            ExecuteObjectCommand(new RemoveChartObjectsCommand(selectedObjectIds));
         }
     }
 
@@ -698,6 +702,49 @@ public partial class EditorMain
             Path = Array.AsReadOnly(path),
             JudgeTicks = Array.AsReadOnly(judges),
         });
+    }
+
+    private void MoveMultipleObjects(IReadOnlyList<ChartObjectDefinition> updatedObjects)
+    {
+        ExecuteObjectCommand(new ReplaceChartObjectsCommand(updatedObjects));
+    }
+
+    private bool MoveSelectedObjectsByDelta(
+        IReadOnlyList<ChartObjectDefinition> selectedObjects,
+        long tickDelta,
+        int laneDelta)
+    {
+        if (selectedObjects.Count < 2)
+        {
+            return false;
+        }
+
+        tickDelta = Math.Clamp(tickDelta,
+            -selectedObjects.Min(item => item.StartTick),
+            long.MaxValue - selectedObjects.Max(item => item.EndTick));
+        int minimumLane = selectedObjects.Min(item => item.Path.Min(point => point.Lane));
+        int maximumLane = selectedObjects.Max(item => item.Path.Max(point => point.Lane + point.Width));
+        laneDelta = Math.Clamp(laneDelta, -minimumLane, 18 - maximumLane);
+
+        ChartObjectDefinition[] updated = selectedObjects.Select(item =>
+        {
+            LanePoint[] path = item.Path.Select(point => point with
+            {
+                Tick = point.Tick + tickDelta,
+                Lane = point.Lane + laneDelta,
+            }).ToArray();
+            long[] judges = item.JudgeTicks.Select(tick => tick + tickDelta).ToArray();
+            return item with
+            {
+                StartTick = item.StartTick + tickDelta,
+                EndTick = item.EndTick + tickDelta,
+                Path = Array.AsReadOnly(path),
+                JudgeTicks = Array.AsReadOnly(judges),
+            };
+        }).ToArray();
+
+        ExecuteObjectCommand(new ReplaceChartObjectsCommand(updated));
+        return true;
     }
 
     private long SnapTick(long tick)

@@ -211,7 +211,7 @@ public static class SongPackageLoader
         return new SongPackageDefinition(fullDirectoryPath, song, timing, charts);
     }
 
-    public static ChartDefinition ParseChart(string json)
+    public static ChartDefinition ParseChart(string json, bool allowEmptyObjects = false)
     {
         ChartDto dto = Deserialize<ChartDto>(json, "chart");
         RequireVersion(dto.FormatVersion, "chart");
@@ -230,7 +230,7 @@ public static class SongPackageLoader
 
         ChartObjectDto[] objectDtos = dto.Objects
             ?? throw new InvalidDataException("objects is required.");
-        if (objectDtos.Length == 0)
+        if (!allowEmptyObjects && objectDtos.Length == 0)
         {
             throw new InvalidDataException("A chart must contain at least one object.");
         }

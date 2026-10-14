@@ -32,7 +32,16 @@ public partial class TimelineView : Control
     private double _playbackSeconds;
     private double _viewStartSeconds;
     private long? _selectedObjectId;
+    private readonly HashSet<long> _selectedObjectIds = new();
     private long? _dragObjectId;
+    private List<ChartObjectDefinition>? _dragGroupOriginals;
+    private ChartObjectDefinition[]? _dragGroupPreview;
+    private long _dragPointerStartTick;
+    private int _dragPointerStartLane;
+    private bool _boxSelecting;
+    private bool _boxSelectMoved;
+    private Vector2 _boxSelectStart;
+    private Vector2 _boxSelectCurrent;
     private long? _dragHoldObjectId;
     private ChartObjectDefinition? _dragHoldOriginal;
     private ChartObjectDefinition? _dragHoldPreview;
@@ -40,6 +49,11 @@ public partial class TimelineView : Control
     private int _holdDragTargetIndex;
     private long _holdDragStartTick;
     private int _holdDragStartLane;
+    private bool _placingClick;
+    private long _clickPlacementTick;
+    private int _clickPlacementStartLane;
+    private int _clickPlacementCurrentLane;
+    private bool _clickPlacementMoved;
     private bool _placingHold;
     private MouseButton _holdPlacementButton = MouseButton.Left;
     private long _holdPlacementStartTick;
@@ -59,9 +73,10 @@ public partial class TimelineView : Control
 
     public event Action<double>? SeekRequested;
     public event Action<long?>? SelectionChanged;
-    public event Action<long, int>? PlaceClickRequested;
+    public event Action<long, int, int>? PlaceClickRequested;
     public event Action<long, long, int>? MoveClickRequested;
     public event Action<long, int>? ResizeClickRequested;
+    public event Action<IReadOnlyList<ChartObjectDefinition>>? ObjectsMovedRequested;
     public event Action<TimelineTool>? ToolChanged;
     public event Action<long, long, int>? PlaceHoldRequested;
     public event Action<ChartObjectDefinition>? HoldEditedRequested;
@@ -74,6 +89,7 @@ public partial class TimelineView : Control
     public bool SnapPlayheadToGrid { get; set; }
     public int PlayheadInfoMode { get; set; }
     public long? SelectedObjectId => _selectedObjectId;
+    public IReadOnlyCollection<long> SelectedObjectIds => _selectedObjectIds;
     public long CurrentTick => _timing is null
         ? 0
         : Math.Max(0, (long)Math.Round(_timing.TimingMap.GetTickAtAudioTimeSeconds(_playbackSeconds)));
@@ -106,9 +122,17 @@ public partial class TimelineView : Control
             ? Math.Clamp(previousStart, 0, Math.Max(0, _durationSeconds - _visibleDurationSeconds))
             : 0;
         _dragObjectId = null;
-        if (_selectedObjectId is long id && !chart.Objects.Any(item => item.ObjectId == id))
+        _boxSelecting = false;
+        HashSet<long> chartObjectIds = chart.Objects.Select(item => item.ObjectId).ToHashSet();
+        bool selectionChanged = _selectedObjectIds.RemoveWhere(id => !chartObjectIds.Contains(id)) > 0;
+        if (_selectedObjectId is long id && !chartObjectIds.Contains(id))
         {
-            SetSelectedObject(null);
+            _selectedObjectId = _selectedObjectIds.Count > 0 ? _selectedObjectIds.Last() : null;
+            selectionChanged = true;
+        }
+        if (selectionChanged)
+        {
+            SelectionChanged?.Invoke(_selectedObjectId);
         }
         QueueRedraw();
     }
@@ -123,20 +147,139 @@ public partial class TimelineView : Control
         _viewStartSeconds = 0;
         SetSelectedObject(null);
         _dragObjectId = null;
+        _boxSelecting = false;
         QueueRedraw();
     }
 
     public void SetSelectedObject(long? objectId)
     {
-        if (_selectedObjectId == objectId)
+        bool changed = _selectedObjectIds.Count != (objectId is null ? 0 : 1)
+            || (objectId is long id && !_selectedObjectIds.Contains(id))
+            || _selectedObjectId != objectId;
+        if (!changed)
         {
             return;
         }
 
+        _selectedObjectIds.Clear();
+        if (objectId is long selectedId)
+        {
+            _selectedObjectIds.Add(selectedId);
+        }
         _selectedObjectId = objectId;
         SelectionChanged?.Invoke(objectId);
         QueueRedraw();
     }
+
+    public void SetSelectedObjects(IEnumerable<long> objectIds)
+    {
+        ArgumentNullException.ThrowIfNull(objectIds);
+        HashSet<long> validIds = _chart?.Objects.Select(item => item.ObjectId).ToHashSet() ?? new HashSet<long>();
+        long[] requestedIds = objectIds.Where(validIds.Contains).Distinct().ToArray();
+        long? primaryId = requestedIds.Length > 0 ? requestedIds[^1] : null;
+        bool changed = !_selectedObjectIds.SetEquals(requestedIds) || _selectedObjectId != primaryId;
+        if (!changed)
+        {
+            return;
+        }
+
+        _selectedObjectIds.Clear();
+        foreach (long id in requestedIds)
+        {
+            _selectedObjectIds.Add(id);
+        }
+
+        _selectedObjectId = primaryId;
+        SelectionChanged?.Invoke(primaryId);
+        QueueRedraw();
+    }
+
+    private void ToggleSelectedObject(long objectId)
+    {
+        bool removed = !_selectedObjectIds.Add(objectId);
+        if (removed)
+        {
+            _selectedObjectIds.Remove(objectId);
+            if (_selectedObjectId == objectId)
+            {
+                _selectedObjectId = _selectedObjectIds.Count > 0 ? _selectedObjectIds.Last() : null;
+            }
+        }
+        else
+        {
+            _selectedObjectId = objectId;
+        }
+
+        SelectionChanged?.Invoke(_selectedObjectId);
+        QueueRedraw();
+    }
+
+    private void AddObjectsToSelection(IEnumerable<long> objectIds)
+    {
+        long? newPrimary = _selectedObjectId;
+        bool changed = false;
+        foreach (long id in objectIds)
+        {
+            if (_selectedObjectIds.Add(id))
+            {
+                newPrimary = id;
+                changed = true;
+            }
+        }
+
+        if (changed)
+        {
+            _selectedObjectId = newPrimary;
+            SelectionChanged?.Invoke(_selectedObjectId);
+            QueueRedraw();
+        }
+    }
+
+    private Rect2 GetBoxSelectionRect()
+    {
+        Vector2 topLeft = new(
+            Math.Min(_boxSelectStart.X, _boxSelectCurrent.X),
+            Math.Min(_boxSelectStart.Y, _boxSelectCurrent.Y));
+        Vector2 bottomRight = new(
+            Math.Max(_boxSelectStart.X, _boxSelectCurrent.X),
+            Math.Max(_boxSelectStart.Y, _boxSelectCurrent.Y));
+        return new Rect2(topLeft, bottomRight - topLeft);
+    }
+
+    private void FinishBoxSelection()
+    {
+        if (_boxSelectMoved && _chart is not null)
+        {
+            Rect2 box = GetBoxSelectionRect();
+            float laneWidth = Math.Max(1, Size.X - AxisWidth) / LaneCount;
+            long[] matches = _chart.Objects
+                .Where(item => RectanglesIntersect(box, GetObjectBounds(item, laneWidth)))
+                .Select(item => item.ObjectId)
+                .ToArray();
+            AddObjectsToSelection(matches);
+        }
+
+        _boxSelecting = false;
+        _boxSelectMoved = false;
+        QueueRedraw();
+    }
+
+    private Rect2 GetObjectBounds(ChartObjectDefinition item, float laneWidth)
+    {
+        int minLane = item.Path.Min(point => point.Lane);
+        int maxLane = item.Path.Max(point => point.Lane + point.Width);
+        long minTick = item.Path.Min(point => point.Tick);
+        long maxTick = item.Path.Max(point => point.Tick);
+        float top = TickToY(maxTick) - 7;
+        float bottom = TickToY(minTick) + 7;
+        float left = AxisWidth + (minLane * laneWidth);
+        float right = AxisWidth + (maxLane * laneWidth);
+        return new Rect2(left, top, Math.Max(2, right - left), Math.Max(14, bottom - top));
+    }
+
+    private static bool RectanglesIntersect(Rect2 first, Rect2 second) =>
+        first.Position.X <= second.End.X && first.End.X >= second.Position.X
+        && first.Position.Y <= second.End.Y && first.End.Y >= second.Position.Y;
 
     public void SetTool(TimelineTool tool)
     {
@@ -160,9 +303,27 @@ public partial class TimelineView : Control
             return;
         }
 
+        if (@event is InputEventMouseMotion boxMotion && _boxSelecting)
+        {
+            _boxSelectCurrent = boxMotion.Position;
+            _boxSelectMoved |= _boxSelectCurrent.DistanceTo(_boxSelectStart) >= 3;
+            QueueRedraw();
+            AcceptEvent();
+            return;
+        }
+
         if (@event is InputEventMouseMotion motion && _dragObjectId is not null)
         {
             UpdateDrag(motion.Position);
+            AcceptEvent();
+            return;
+        }
+
+        if (@event is InputEventMouseMotion clickPlacementMotion && _placingClick)
+        {
+            _clickPlacementCurrentLane = ToLane(clickPlacementMotion.Position.X);
+            _clickPlacementMoved |= _clickPlacementCurrentLane != _clickPlacementStartLane;
+            QueueRedraw();
             AcceptEvent();
             return;
         }
@@ -204,6 +365,30 @@ public partial class TimelineView : Control
         if (mouse.ButtonIndex == MouseButton.Left && !mouse.Pressed && _dragObjectId is not null)
         {
             FinishDrag(mouse.Position);
+            AcceptEvent();
+            return;
+        }
+
+        if (mouse.ButtonIndex == MouseButton.Left && !mouse.Pressed && _boxSelecting)
+        {
+            FinishBoxSelection();
+            AcceptEvent();
+            return;
+        }
+
+        if (mouse.ButtonIndex == MouseButton.Left && !mouse.Pressed && _placingClick)
+        {
+            _clickPlacementCurrentLane = ToLane(mouse.Position.X);
+            _clickPlacementMoved |= _clickPlacementCurrentLane != _clickPlacementStartLane;
+            (int lane, int width) = ResolveClickPlacement(
+                _clickPlacementStartLane,
+                _clickPlacementCurrentLane,
+                _clickPlacementMoved,
+                PlacementWidth);
+            _placingClick = false;
+            _clickPlacementMoved = false;
+            PlaceClickRequested?.Invoke(_clickPlacementTick, lane, width);
+            QueueRedraw();
             AcceptEvent();
             return;
         }
@@ -262,7 +447,7 @@ public partial class TimelineView : Control
         {
             if (Tool == TimelineTool.PlaceClick && mouse.Position.X >= AxisWidth)
             {
-                PlaceClickRequested?.Invoke(CurrentTick, ToLane(mouse.Position.X));
+                PlaceClickRequested?.Invoke(CurrentTick, ToLane(mouse.Position.X), PlacementWidth);
             }
             else if (Tool == TimelineTool.PlaceHold && mouse.Position.X >= AxisWidth)
             {
@@ -301,6 +486,25 @@ public partial class TimelineView : Control
         }
 
         ChartObjectDefinition? hit = HitTest(mouse.Position);
+        if (Tool == TimelineTool.Select && mouse.CtrlPressed && mouse.Position.X >= AxisWidth)
+        {
+            if (hit is not null)
+            {
+                ToggleSelectedObject(hit.ObjectId);
+            }
+            else
+            {
+                _boxSelecting = true;
+                _boxSelectMoved = false;
+                _boxSelectStart = mouse.Position;
+                _boxSelectCurrent = mouse.Position;
+                QueueRedraw();
+            }
+
+            AcceptEvent();
+            return;
+        }
+
         if (hit is not null)
         {
             if (hit.Type == ChartObjectType.Hold && mouse.AltPressed)
@@ -311,21 +515,17 @@ public partial class TimelineView : Control
                 return;
             }
 
-            bool wasSelected = _selectedObjectId == hit.ObjectId;
-            SetSelectedObject(hit.ObjectId);
-            if (Tool == TimelineTool.Select && hit.Type == ChartObjectType.Click)
+            bool wasSelected = _selectedObjectIds.Contains(hit.ObjectId);
+            if (!wasSelected)
             {
-                _dragObjectId = hit.ObjectId;
-                _resizingClick = wasSelected && IsNearRightEdge(hit, mouse.Position.X);
-                _dragMoved = false;
-                _dragStartPosition = mouse.Position;
-                _dragLaneOffset = Math.Clamp(ToLane(mouse.Position.X) - hit.StartPoint.Lane,
-                    0, hit.StartPoint.Width - 1);
-                _previewTick = hit.StartTick;
-                _previewLane = hit.StartPoint.Lane;
-                _previewWidth = hit.StartPoint.Width;
+                SetSelectedObject(hit.ObjectId);
             }
-            else if (Tool == TimelineTool.Select && hit.Type == ChartObjectType.Hold)
+            if (hit.Type == ChartObjectType.Click)
+            {
+                BeginGroupObjectDrag(hit, mouse.Position,
+                    Tool == TimelineTool.Select && wasSelected && IsNearRightEdge(hit, mouse.Position.X));
+            }
+            else if (hit.Type == ChartObjectType.Hold)
             {
                 BeginHoldDrag(hit, mouse.Position);
             }
@@ -345,7 +545,12 @@ public partial class TimelineView : Control
         }
         else if (Tool == TimelineTool.PlaceClick && mouse.Position.X >= AxisWidth)
         {
-            PlaceClickRequested?.Invoke(ToTick(mouse.Position.Y), ToLane(mouse.Position.X));
+            _placingClick = true;
+            _clickPlacementTick = ToTick(mouse.Position.Y);
+            _clickPlacementStartLane = ToLane(mouse.Position.X);
+            _clickPlacementCurrentLane = _clickPlacementStartLane;
+            _clickPlacementMoved = false;
+            QueueRedraw();
         }
         else
         {
@@ -379,11 +584,17 @@ public partial class TimelineView : Control
             foreach (ChartObjectDefinition item in _chart.Objects)
             {
                 ChartObjectDefinition displayed = item;
-                if (_dragHoldObjectId == item.ObjectId && _dragHoldPreview is not null)
+                ChartObjectDefinition? groupPreview = _dragGroupPreview?
+                    .FirstOrDefault(preview => preview.ObjectId == item.ObjectId);
+                if (groupPreview is not null)
+                {
+                    displayed = groupPreview;
+                }
+                else if (_dragHoldObjectId == item.ObjectId && _dragHoldPreview is not null)
                 {
                     displayed = _dragHoldPreview;
                 }
-                if (_dragMoved && _dragObjectId == item.ObjectId)
+                if (_dragMoved && _resizingClick && _dragObjectId == item.ObjectId)
                 {
                     displayed = item with
                     {
@@ -394,11 +605,21 @@ public partial class TimelineView : Control
                 }
 
                 DrawObject(displayed, laneWidth);
-                if (_selectedObjectId == item.ObjectId)
+                if (_selectedObjectIds.Contains(item.ObjectId))
                 {
                     DrawSelection(displayed, laneWidth);
                 }
             }
+        }
+
+        if (_placingClick && _timing is not null)
+        {
+            (int lane, int width) = ResolveClickPlacement(
+                _clickPlacementStartLane,
+                _clickPlacementCurrentLane,
+                _clickPlacementMoved,
+                PlacementWidth);
+            DrawPoint(_clickPlacementTick, lane, width, laneWidth, new Color("e0b875"), 5);
         }
 
         if (_placingHold && _timing is not null)
@@ -419,6 +640,13 @@ public partial class TimelineView : Control
                     Array.Empty<long>());
                 DrawHoldBody(preview, laneWidth, new Color("e0b875"));
             }
+        }
+
+        if (_boxSelecting && _boxSelectMoved)
+        {
+            Rect2 box = GetBoxSelectionRect();
+            DrawRect(box, new Color("7fa6d8", 0.13f));
+            DrawRect(box, new Color("9dbbe2", 0.8f), filled: false, width: 1);
         }
 
         float playheadY = TimeToY(_playbackSeconds);
@@ -819,6 +1047,17 @@ public partial class TimelineView : Control
         DrawRect(new Rect2(x, y - halfHeight, noteWidth, halfHeight * 2), color);
     }
 
+    internal static (int Lane, int Width) ResolveClickPlacement(
+        int startLane,
+        int currentLane,
+        bool draggedAcrossLanes,
+        int presetWidth)
+    {
+        int lane = draggedAcrossLanes ? Math.Min(startLane, currentLane) : startLane;
+        int width = draggedAcrossLanes ? Math.Abs(currentLane - startLane) + 1 : presetWidth;
+        return (lane, Math.Clamp(width, 1, LaneCount - lane));
+    }
+
     private ChartObjectDefinition? HitTest(Vector2 position)
     {
         if (_chart is null || _timing is null || position.X < AxisWidth)
@@ -850,7 +1089,7 @@ public partial class TimelineView : Control
                 continue;
             }
 
-            if (_selectedObjectId == item.ObjectId)
+            if (_selectedObjectIds.Contains(item.ObjectId))
             {
                 float selectedLaneWidth = Math.Max(1, Size.X - AxisWidth) / LaneCount;
                 foreach (LanePoint point in item.Path)
@@ -944,6 +1183,14 @@ public partial class TimelineView : Control
                 _holdDragTargetIndex = index;
                 return;
             }
+        }
+
+        if (_holdDragMode == HoldDragMode.Body && _selectedObjectIds.Count > 1)
+        {
+            _dragHoldObjectId = null;
+            _dragHoldOriginal = null;
+            _dragHoldPreview = null;
+            BeginGroupObjectDrag(hold, position, resizing: false);
         }
     }
 
@@ -1070,9 +1317,22 @@ public partial class TimelineView : Control
         }
         else
         {
-            _previewTick = ToTick(position.Y);
-            _previewLane = Math.Clamp(ToLane(position.X) - _dragLaneOffset,
-                0, LaneCount - item.StartPoint.Width);
+            long tickDelta = ToTick(position.Y) - _dragPointerStartTick;
+            int laneDelta = ToLane(position.X) - _dragPointerStartLane;
+            if (_dragGroupOriginals is { Count: > 0 } originals)
+            {
+                long minimumTick = originals.Min(original => original.StartTick);
+                long maximumTick = originals.Max(original => original.EndTick);
+                tickDelta = Math.Clamp(tickDelta, -minimumTick, long.MaxValue - maximumTick);
+                int minimumLane = originals.Min(original => original.Path.Min(point => point.Lane));
+                int maximumLane = originals.Max(original => original.Path.Max(point => point.Lane + point.Width));
+                laneDelta = Math.Clamp(laneDelta, -minimumLane, LaneCount - maximumLane);
+                _dragGroupPreview = originals
+                    .Select(original => TranslateObject(original, tickDelta, laneDelta))
+                    .ToArray();
+                _previewTick = item.StartTick + tickDelta;
+                _previewLane = item.StartPoint.Lane + laneDelta;
+            }
         }
 
         QueueRedraw();
@@ -1087,7 +1347,10 @@ public partial class TimelineView : Control
         long tick = _previewTick;
         int lane = _previewLane;
         int width = _previewWidth;
+        ChartObjectDefinition[]? movedObjects = _dragGroupPreview;
         _dragObjectId = null;
+        _dragGroupOriginals = null;
+        _dragGroupPreview = null;
         _dragMoved = false;
         QueueRedraw();
         if (changed && id is long objectId)
@@ -1096,11 +1359,64 @@ public partial class TimelineView : Control
             {
                 ResizeClickRequested?.Invoke(objectId, width);
             }
+            else if (movedObjects is { Length: > 1 })
+            {
+                ObjectsMovedRequested?.Invoke(movedObjects);
+            }
             else
             {
-                MoveClickRequested?.Invoke(objectId, tick, lane);
+                ChartObjectDefinition? moved = movedObjects?.FirstOrDefault();
+                MoveClickRequested?.Invoke(objectId, moved?.StartTick ?? tick,
+                    moved?.StartPoint.Lane ?? lane);
             }
         }
+    }
+
+    private void BeginGroupObjectDrag(ChartObjectDefinition item, Vector2 position, bool resizing)
+    {
+        if (_chart is null)
+        {
+            return;
+        }
+
+        _dragObjectId = item.ObjectId;
+        _resizingClick = resizing;
+        _dragMoved = false;
+        _dragStartPosition = position;
+        _dragPointerStartTick = ToTick(position.Y);
+        _dragPointerStartLane = ToLane(position.X);
+        _dragLaneOffset = Math.Clamp(_dragPointerStartLane - item.StartPoint.Lane,
+            0, item.StartPoint.Width - 1);
+        _previewTick = item.StartTick;
+        _previewLane = item.StartPoint.Lane;
+        _previewWidth = item.StartPoint.Width;
+        long[] selectedIds = _selectedObjectIds.Contains(item.ObjectId) && !resizing
+            ? _selectedObjectIds.ToArray()
+            : new[] { item.ObjectId };
+        _dragGroupOriginals = _chart.Objects
+            .Where(candidate => selectedIds.Contains(candidate.ObjectId))
+            .ToList();
+        _dragGroupPreview = _dragGroupOriginals.ToArray();
+    }
+
+    private static ChartObjectDefinition TranslateObject(
+        ChartObjectDefinition item,
+        long tickDelta,
+        int laneDelta)
+    {
+        LanePoint[] path = item.Path.Select(point => point with
+        {
+            Tick = point.Tick + tickDelta,
+            Lane = point.Lane + laneDelta,
+        }).ToArray();
+        long[] judges = item.JudgeTicks.Select(tick => tick + tickDelta).ToArray();
+        return item with
+        {
+            StartTick = item.StartTick + tickDelta,
+            EndTick = item.EndTick + tickDelta,
+            Path = Array.AsReadOnly(path),
+            JudgeTicks = Array.AsReadOnly(judges),
+        };
     }
 
     private double ToSeconds(float y) => Math.Clamp(_viewStartSeconds

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using AtEnd.Core;
@@ -19,6 +20,7 @@ public partial class EditorMain
     private Button? _undoButton;
     private Button? _redoButton;
     private Button? _saveAsButton;
+    private ChartObjectDefinition[] _clipboardObjects = Array.Empty<ChartObjectDefinition>();
 
     public override void _EnterTree()
     {
@@ -67,12 +69,38 @@ public partial class EditorMain
             return;
         }
 
+        if (GetViewport().GuiGetFocusOwner() is LineEdit
+            && key.Keycode is Key.C or Key.X or Key.V or Key.M)
+        {
+            return;
+        }
+
         if (!key.CtrlPressed)
         {
             return;
         }
 
-        if (key.Keycode == Key.Z && key.ShiftPressed)
+        if (key.Keycode == Key.C)
+        {
+            CopySelectedObjects();
+            GetViewport().SetInputAsHandled();
+        }
+        else if (key.Keycode == Key.X)
+        {
+            CutSelectedObjects();
+            GetViewport().SetInputAsHandled();
+        }
+        else if (key.Keycode == Key.V)
+        {
+            PasteCopiedObjects();
+            GetViewport().SetInputAsHandled();
+        }
+        else if (key.Keycode == Key.M)
+        {
+            MirrorSelectedObjects();
+            GetViewport().SetInputAsHandled();
+        }
+        else if (key.Keycode == Key.Z && key.ShiftPressed)
         {
             RedoDocument();
             GetViewport().SetInputAsHandled();
@@ -89,6 +117,117 @@ public partial class EditorMain
         }
     }
 
+    private ChartObjectDefinition[] GetSelectedChartObjects()
+    {
+        if (_timeline is null || _document is null)
+        {
+            return Array.Empty<ChartObjectDefinition>();
+        }
+
+        HashSet<long> selectedIds = _timeline.SelectedObjectIds.ToHashSet();
+        return _document.CurrentChart.Objects
+            .Where(item => selectedIds.Contains(item.ObjectId))
+            .ToArray();
+    }
+
+    private void CopySelectedObjects()
+    {
+        ChartObjectDefinition[] selectedObjects = GetSelectedChartObjects();
+        if (selectedObjects.Length == 0)
+        {
+            return;
+        }
+
+        _clipboardObjects = selectedObjects.Select(CloneChartObject).ToArray();
+    }
+
+    private void CutSelectedObjects()
+    {
+        ChartObjectDefinition[] selectedObjects = GetSelectedChartObjects();
+        if (selectedObjects.Length == 0)
+        {
+            return;
+        }
+
+        _clipboardObjects = selectedObjects.Select(CloneChartObject).ToArray();
+        DeleteSelectedClick();
+    }
+
+    private void PasteCopiedObjects()
+    {
+        if (_document is null || _timeline is null || _clipboardObjects.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            long sourceStartTick = _clipboardObjects.Min(item => item.StartTick);
+            long tickDelta = _timeline.CurrentTick - sourceStartTick;
+            ChartObjectDefinition[] pastedObjects = _clipboardObjects.Select(item =>
+            {
+                long objectId = _document.AllocateObjectId();
+                return ShiftChartObject(item, objectId, tickDelta);
+            }).ToArray();
+
+            if (ExecuteObjectCommand(new AddChartObjectsCommand(pastedObjects)))
+            {
+                _timeline.SetSelectedObjects(pastedObjects.Select(item => item.ObjectId));
+            }
+        }
+        catch (Exception exception) when (exception is InvalidDataException or ArgumentException or OverflowException)
+        {
+            SetStatus($"粘贴失败：{LocalizeError(exception)}", isError: true);
+        }
+    }
+
+    private void MirrorSelectedObjects()
+    {
+        ChartObjectDefinition[] selectedObjects = GetSelectedChartObjects();
+        if (selectedObjects.Length == 0)
+        {
+            return;
+        }
+
+        ExecuteObjectCommand(new ReplaceChartObjectsCommand(MirrorChartObjects(selectedObjects)));
+    }
+
+    private static ChartObjectDefinition[] MirrorChartObjects(
+        IReadOnlyList<ChartObjectDefinition> objects)
+    {
+        int minimumLane = objects.SelectMany(item => item.Path).Min(point => point.Lane);
+        int maximumLaneEdge = objects.SelectMany(item => item.Path).Max(point => point.Lane + point.Width);
+        int reflectedLaneSum = minimumLane + maximumLaneEdge;
+        return objects.Select(item => item with
+        {
+            Path = Array.AsReadOnly(item.Path.Select(point => point with
+            {
+                Lane = reflectedLaneSum - point.Lane - point.Width,
+            }).ToArray()),
+        }).ToArray();
+    }
+
+    private static ChartObjectDefinition CloneChartObject(ChartObjectDefinition item) => item with
+    {
+        Path = Array.AsReadOnly(item.Path.ToArray()),
+        JudgeTicks = Array.AsReadOnly(item.JudgeTicks.ToArray()),
+    };
+
+    private static ChartObjectDefinition ShiftChartObject(
+        ChartObjectDefinition item,
+        long objectId,
+        long tickDelta) => item with
+    {
+        ObjectId = objectId,
+        StartTick = checked(item.StartTick + tickDelta),
+        EndTick = checked(item.EndTick + tickDelta),
+        Path = Array.AsReadOnly(item.Path.Select(point => point with
+        {
+            Tick = checked(point.Tick + tickDelta),
+        }).ToArray()),
+        JudgeTicks = Array.AsReadOnly(item.JudgeTicks.Select(tick => checked(tick + tickDelta)).ToArray()),
+    };
+
     private void MoveSelectedObjectWithArrow(Key key)
     {
         if (_timeline is null)
@@ -99,6 +238,36 @@ public partial class EditorMain
         if (GetSelectedObject() is not ChartObjectDefinition item)
         {
             _timeline.MovePlayheadWithArrow(key);
+            return;
+        }
+
+        ChartObjectDefinition[] selectedObjects = _timeline.SelectedObjectIds
+            .Select(id => _document?.CurrentChart.Objects.FirstOrDefault(value => value.ObjectId == id))
+            .Where(value => value is not null)
+            .Cast<ChartObjectDefinition>()
+            .ToArray();
+        if (selectedObjects.Length > 1)
+        {
+            long groupTickDelta = 0;
+            int groupLaneDelta = 0;
+            long groupTickStep = Math.Max(1, _timeline.SnapTicks);
+            switch (key)
+            {
+                case Key.Left:
+                    groupLaneDelta = -1;
+                    break;
+                case Key.Right:
+                    groupLaneDelta = 1;
+                    break;
+                case Key.Up:
+                    groupTickDelta = groupTickStep;
+                    break;
+                case Key.Down:
+                    groupTickDelta = -groupTickStep;
+                    break;
+            }
+
+            MoveSelectedObjectsByDelta(selectedObjects, groupTickDelta, groupLaneDelta);
             return;
         }
 
@@ -373,8 +542,52 @@ public partial class EditorMain
                 Path.DirectorySeparatorChar,
                 Path.AltDirectorySeparatorChar))?.FullName
             ?? throw new DirectoryNotFoundException("Could not locate the repository.");
+        (int Lane, int Width) rightwardClick = TimelineView.ResolveClickPlacement(4, 7, true, 1);
+        (int Lane, int Width) leftwardClick = TimelineView.ResolveClickPlacement(7, 4, true, 1);
+        (int Lane, int Width) presetClick = TimelineView.ResolveClickPlacement(4, 4, false, 5);
+        if (rightwardClick != (4, 4) || leftwardClick != (4, 4)
+            || presetClick != (4, 5)
+            || TimelineView.ResolveClickPlacement(16, 17, true, 1) != (16, 2))
+        {
+            throw new InvalidOperationException("Click placement drag width calculation failed.");
+        }
+
         ChartDefinition source = SongPackageLoader.LoadDirectory(
             Path.Combine(repositoryDirectory, "songs", "test-song")).Charts[0];
+        var clipboardDocument = new EditableChartDocument(source);
+        ChartObjectDefinition[] copiedObjects = source.Objects.Take(2).Select(item =>
+            ShiftChartObject(item, clipboardDocument.AllocateObjectId(), 960)).ToArray();
+        clipboardDocument.Execute(new AddChartObjectsCommand(copiedObjects));
+        if (clipboardDocument.CurrentChart.Objects.Count != source.Objects.Count + copiedObjects.Length
+            || copiedObjects.Any(item => !clipboardDocument.CurrentChart.Objects.Any(value => value.ObjectId == item.ObjectId && value.StartTick == item.StartTick)))
+        {
+            throw new InvalidOperationException("Multi-object paste command failed.");
+        }
+
+        clipboardDocument.Undo();
+        if (clipboardDocument.CurrentChart.Objects.Count != source.Objects.Count)
+        {
+            throw new InvalidOperationException("Multi-object paste undo failed.");
+        }
+
+        clipboardDocument.Redo();
+        ChartObjectDefinition[] mirrorSources = source.Objects.Take(2).ToArray();
+        ChartObjectDefinition[] mirroredObjects = MirrorChartObjects(mirrorSources);
+        int mirrorLaneSum = mirrorSources.SelectMany(item => item.Path)
+            .Min(point => point.Lane)
+            + mirrorSources.SelectMany(item => item.Path).Max(point => point.Lane + point.Width);
+        for (int itemIndex = 0; itemIndex < mirrorSources.Length; itemIndex++)
+        {
+            if (mirroredObjects[itemIndex].StartTick != mirrorSources[itemIndex].StartTick
+                || mirroredObjects[itemIndex].EndTick != mirrorSources[itemIndex].EndTick
+                || mirroredObjects[itemIndex].Path.Where((point, pointIndex) =>
+                    point.Lane != mirrorLaneSum - mirrorSources[itemIndex].Path[pointIndex].Lane - point.Width)
+                    .Any())
+            {
+                throw new InvalidOperationException("Selected-object mirror transform failed.");
+            }
+        }
+
         var document = new EditableChartDocument(source);
         document.Execute(new EditChartMetadataCommand(
             source.ChartId + "-smoke-copy",
@@ -437,18 +650,57 @@ public partial class EditorMain
             throw new InvalidOperationException("Click deletion or ID allocation failed.");
         }
 
+        long[] batchDeleteIds = source.Objects.Take(2).Select(item => item.ObjectId).ToArray();
+        if (batchDeleteIds.Length != 2)
+        {
+            throw new InvalidOperationException("Batch deletion smoke test requires two chart objects.");
+        }
+
+        var batchDocument = new EditableChartDocument(source);
+        batchDocument.Execute(new RemoveChartObjectsCommand(batchDeleteIds));
+        if (batchDocument.CurrentChart.Objects.Any(item => batchDeleteIds.Contains(item.ObjectId))
+            || !batchDocument.CanUndo)
+        {
+            throw new InvalidOperationException("Batch object deletion failed.");
+        }
+
+        batchDocument.Undo();
+        if (batchDeleteIds.Any(id => !batchDocument.CurrentChart.Objects.Any(item => item.ObjectId == id)))
+        {
+            throw new InvalidOperationException("Batch object deletion undo failed.");
+        }
+
         var oneObjectChart = source with
         {
             Objects = Array.AsReadOnly(new[] { source.Objects[0] }),
         };
+        var emptyDocument = new EditableChartDocument(oneObjectChart);
+        emptyDocument.Execute(new RemoveChartObjectsCommand(new[] { source.Objects[0].ObjectId }));
+        if (emptyDocument.CurrentChart.Objects.Count != 0 || !emptyDocument.IsDirty)
+        {
+            throw new InvalidOperationException("Deleting all chart objects failed.");
+        }
+
+        string emptyChartJson = ChartSerializer.Serialize(emptyDocument.CurrentChart);
         try
         {
-            new EditableChartDocument(oneObjectChart).Execute(
-                new RemoveChartObjectCommand(source.Objects[0].ObjectId));
-            throw new InvalidOperationException("Last object deletion was accepted.");
+            SongPackageLoader.ParseChart(emptyChartJson);
+            throw new InvalidOperationException("An empty chart was accepted by the file loader.");
         }
         catch (InvalidDataException)
         {
+        }
+
+        emptyDocument.Undo();
+        if (emptyDocument.CurrentChart.Objects.Count != 1)
+        {
+            throw new InvalidOperationException("Undo after deleting all chart objects failed.");
+        }
+
+        emptyDocument.Redo();
+        if (emptyDocument.CurrentChart.Objects.Count != 0)
+        {
+            throw new InvalidOperationException("Redo after deleting all chart objects failed.");
         }
 
         string temporaryPackage = Path.Combine(
@@ -460,6 +712,19 @@ public partial class EditorMain
         {
             string savedPath = ChartFileSaver.SaveAs(document, temporaryPackage, "smoke-copy");
             ChartDefinition saved = SongPackageLoader.ParseChart(File.ReadAllText(savedPath));
+            try
+            {
+                ChartFileSaver.SaveAs(emptyDocument, temporaryPackage, "empty-chart");
+                throw new InvalidOperationException("An empty chart was saved.");
+            }
+            catch (InvalidDataException)
+            {
+            }
+
+            if (File.Exists(Path.Combine(temporaryPackage, "charts", "empty-chart.atendchart")))
+            {
+                throw new InvalidOperationException("An empty chart file was created.");
+            }
             if (document.IsDirty || saved.ChartId != document.CurrentChart.ChartId)
             {
                 throw new InvalidOperationException("Editable document save failed.");

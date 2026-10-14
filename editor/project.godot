@@ -7,6 +7,7 @@ config_version=5
 config/name="AtEnd Chart Editor"
 run/main_scene="res://src/EditorMain.tscn"
 config/features=PackedStringArray("4.7", "C#", "GL Compatibility")
+boot_splash/show_image=false
 
 [display]
 
